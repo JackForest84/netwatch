@@ -1,0 +1,14 @@
+# NetWatch dashboard — Python dependencies
+fastapi
+uvicorn[standard]
+jinja2
+python-multipart        # form-based login
+requests
+psutil                  # host metrics
+maxminddb               # MaxMind GeoLite2 country/ASN lookups
+itsdangerous            # signed session cookie
+urllib3
+
+# Front-end libs (Chart.js, D3, topojson, world-atlas) load from a CDN in
+# templates/index.html — no Python dependency. ntopng/Redis/Suricata/EveBox
+# are external services, not pip packages.

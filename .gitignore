@@ -1,0 +1,30 @@
+# Secrets & local state — NEVER commit
+.env
+*.key
+*.cred
+*.pass
+*.pem
+*.crt
+adguard.json
+secrets/
+
+# Database / runtime data (contains real alert/attacker/device history)
+*.db
+*.db-wal
+*.db-shm
+*.sqlite*
+
+# Large / generated assets
+oui.txt
+static/hero.png
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/

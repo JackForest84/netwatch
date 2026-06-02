@@ -1,0 +1,2759 @@
+<!DOCTYPE html>
+<html lang="cs" class="bg-slate-950">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ app_name }} · {{ hostname }}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="icon" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMDAgMTAwIj48dGV4dCB5PSIuOWVtIiBmb250LXNpemU9IjkwIj7wn5uhPC90ZXh0Pjwvc3ZnPg==">
+  <link rel="stylesheet" href="/static/app.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/d3@7.8.5/dist/d3.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/topojson@3.0.2/dist/topojson.min.js"></script>
+
+
+  <style>
+    * { font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+    .font-mono, .font-mono * { font-family: 'JetBrains Mono', ui-monospace, monospace; }
+    body { font-feature-settings: "cv11", "ss01"; }
+
+    .dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+    .dot-ok { background: rgb(52 211 153); box-shadow: 0 0 6px rgb(52 211 153 / 0.6); }
+    .dot-bad { background: rgb(244 63 94); box-shadow: 0 0 6px rgb(244 63 94 / 0.6); }
+    .dot-warn { background: rgb(251 191 36); box-shadow: 0 0 6px rgb(251 191 36 / 0.6); }
+    .dot-off { background: rgb(71 85 105); }
+
+    .scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+    .scrollbar::-webkit-scrollbar-track { background: rgb(15 23 42); }
+    .scrollbar::-webkit-scrollbar-thumb { background: rgb(51 65 85); border-radius: 3px; }
+
+    @keyframes pulse-ring { 0% { box-shadow: 0 0 0 0 rgb(52 211 153 / 0.7); } 70% { box-shadow: 0 0 0 6px rgb(52 211 153 / 0); } 100% { box-shadow: 0 0 0 0 rgb(52 211 153 / 0); }}
+    .pulse { animation: pulse-ring 2s infinite; }
+
+    /* HERO BANNER */
+    .hero {
+      position: relative;
+      border-radius: 1rem;
+      overflow: hidden;
+      min-height: 240px;
+    }
+    .hero-bg {
+      position: absolute; inset: 0;
+      background-image: url('/static/hero.png');
+      background-size: cover;
+      background-position: center 30%;
+      opacity: 0.55;
+      filter: saturate(1.1);
+    }
+    .hero-grad {
+      position: absolute; inset: 0;
+      background:
+        radial-gradient(circle at 80% 50%, rgba(6,182,212,0.18), transparent 50%),
+        linear-gradient(180deg, rgba(2,6,23,0.3) 0%, rgba(2,6,23,0.85) 100%),
+        linear-gradient(90deg, rgba(2,6,23,0.95) 0%, rgba(2,6,23,0.4) 100%);
+    }
+    .hero-inner { position: relative; padding: 1.5rem 2rem; }
+    .hero-title {
+      font-size: 2.25rem; font-weight: 800; letter-spacing: -0.02em;
+      background: linear-gradient(180deg, #f1f5f9 0%, #94a3b8 100%);
+      -webkit-background-clip: text; background-clip: text; color: transparent;
+    }
+    .hero-shield {
+      filter: drop-shadow(0 0 16px rgba(56, 189, 248, 0.5));
+    }
+
+    /* Sci-fi animated grid background */
+    .bg-grid {
+      background-color: #020617;
+      background-image:
+        radial-gradient(circle at 25% 0%, rgba(59,130,246,0.08), transparent 50%),
+        radial-gradient(circle at 75% 100%, rgba(34,211,238,0.05), transparent 50%),
+        linear-gradient(rgba(56,189,248,0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(56,189,248,0.03) 1px, transparent 1px);
+      background-size: auto, auto, 40px 40px, 40px 40px;
+      background-attachment: fixed;
+    }
+
+    /* Sci-fi: subtle scan line over cards */
+    .card::before {
+      content: "";
+      position: absolute; top: 0; left: 0; right: 0; height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(56,189,248,0.4), transparent);
+      pointer-events: none;
+    }
+    .card { position: relative; }
+    .card:hover { border-color: rgba(56,189,248,0.3); transition: border-color .25s; }
+
+    /* Glow on numeric stats */
+    .stat-num { text-shadow: 0 0 12px currentColor; }
+    .big-stat { text-shadow: 0 0 16px currentColor; opacity: 0.95; }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; animation: fade-in 0.25s ease-out; }
+    @keyframes fade-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); }}
+
+    /* Audit P2 #10: focus rings for keyboard nav */
+    :focus-visible { outline: 2px solid rgb(34 211 238); outline-offset: 2px; border-radius: 4px; }
+    button:focus-visible, .chip:focus-visible, .period-chip:focus-visible { outline-offset: 1px; }
+
+    /* Audit P2 #12: pulsing dot for running services */
+    @keyframes status-pulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.7); }
+      50%      { box-shadow: 0 0 0 4px rgba(52, 211, 153, 0); }
+    }
+    .pill-ok .dot { animation: status-pulse 2.5s infinite; }
+
+    /* Audit P0 #8: hover-expandable truncated signatures (and any data-full) */
+    .truncate-expand { position: relative; cursor: help; }
+    .truncate-expand:hover[data-full]::after {
+      content: attr(data-full);
+      position: absolute; bottom: calc(100% + 4px); left: 0;
+      z-index: 65; padding: 8px 10px;
+      background: rgba(8,14,28,0.97); border: 1px solid rgba(56,189,248,0.4);
+      border-radius: 6px; color: rgb(226 232 240);
+      font: 11px/1.5 'JetBrains Mono', monospace;
+      white-space: normal; min-width: 280px; max-width: 460px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.6);
+    }
+
+    /* Audit P1 #7: compact alert rows (was 56px, now 36px) */
+    .alert-row td { padding-top: 4px; padding-bottom: 4px; line-height: 1.3; }
+
+    /* Audit P0 #7: sortable column headers */
+    th.sortable { cursor: pointer; user-select: none; transition: color .15s; }
+    th.sortable:hover { color: rgb(34 211 238); }
+    th.sortable .sort-arrow { display: inline-block; width: 10px; opacity: 0.5; margin-left: 2px; }
+    th.sortable.sort-asc .sort-arrow::after { content: "▲"; }
+    th.sortable.sort-desc .sort-arrow::after { content: "▼"; }
+
+    /* Audit P2 #12: down/bad pill stronger */
+    .pill-bad { border-color: rgba(244,63,94,0.65); animation: status-pulse-bad 1.8s infinite; }
+    @keyframes status-pulse-bad {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(244,63,94,0.7); }
+      50%      { box-shadow: 0 0 0 6px rgba(244,63,94,0); }
+    }
+
+    /* Audit P3 #3: Wall of Shame tile */
+    .wos-tile {
+      position: relative; padding: 10px;
+      background: rgba(15,23,42,0.5); border-radius: 8px;
+      border: 1px solid rgba(51,65,85,0.5);
+      transition: all .15s; cursor: pointer;
+      font-family: 'JetBrains Mono', monospace;
+    }
+    .wos-tile:hover { background: rgba(15,23,42,0.8); transform: translateY(-1px); }
+    .wos-tile.critical { border-color: rgba(244,63,94,0.7); box-shadow: inset 0 0 0 1px rgba(244,63,94,0.15), 0 0 16px -6px rgba(244,63,94,0.4); }
+    .wos-tile.high     { border-color: rgba(251,146,60,0.6); box-shadow: inset 0 0 0 1px rgba(251,146,60,0.12); }
+    .wos-tile.medium   { border-color: rgba(251,191,36,0.45); }
+
+    /* Audit P1 #12: high-retries highlight */
+    .retries-high { color: rgb(248 113 113); font-weight: 600; }
+    .retries-warn { color: rgb(251 191 36); }
+
+    /* Tooltip — flips below the trigger when near top, never clips */
+    .tip { position: relative; cursor: help; color: rgb(100 116 139); font-size: 11px; vertical-align: 1px; margin-left: 4px; }
+    .tip:hover { color: rgb(125 211 252); }
+    .tip[data-tip]::after {
+      content: attr(data-tip);
+      position: absolute; top: calc(100% + 6px); left: 0;
+      background: rgba(8,14,28,0.96); color: rgb(226 232 240);
+      padding: 8px 10px; border-radius: 6px; font-size: 11px; line-height: 1.45; font-weight: 400;
+      white-space: normal; min-width: 200px; max-width: 320px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.6); border: 1px solid rgba(56,189,248,0.4);
+      opacity: 0; pointer-events: none; transition: opacity .15s; z-index: 60;
+    }
+    .tip:hover[data-tip]::after { opacity: 1; }
+
+    /* Period selector chips */
+    .period-chip {
+      padding: 4px 10px; font-size: 11px; font-weight: 500;
+      border-radius: 6px; color: rgb(148 163 184);
+      background: rgba(15,23,42,0.4); border: 1px solid rgba(51,65,85,0.5);
+      cursor: pointer; transition: all .15s;
+      font-family: 'JetBrains Mono', monospace;
+    }
+    .period-chip:hover { color: rgb(125 211 252); border-color: rgba(56,189,248,0.4); }
+    .period-chip.active {
+      color: rgb(34 211 238); background: rgba(6,182,212,0.15);
+      border-color: rgba(34,211,238,0.6);
+      box-shadow: 0 0 12px rgba(34,211,238,0.25);
+    }
+
+    /* Fullscreen globe modal */
+    #globe-fullscreen-modal {
+      position: fixed; inset: 0; z-index: 70; display: none;
+      background: radial-gradient(circle at 50% 50%, rgb(2,6,23), #000);
+    }
+    #globe-fullscreen-modal.show { display: block; }
+    #globe-fullscreen-svg { width: 100%; height: 100vh; cursor: grab; user-select: none; touch-action: none; }
+    #globe-fullscreen-svg:active, #globe-fullscreen-svg.dragging { cursor: grabbing; }
+    #feed-fullscreen-modal { position: fixed; inset: 0; background: rgba(2,6,23,0.97); z-index: 60; display: none; padding: 56px 16px 16px; }
+    #feed-fullscreen-modal.show { display: block; }
+    .live-dot { width: 7px; height: 7px; border-radius: 9999px; background: #34d399; box-shadow: 0 0 6px #34d399; display: inline-block; animation: live-pulse 1.6s ease-in-out infinite; }
+    @keyframes live-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+    .ring-flash { animation: ring-flash 1.4s ease-out; border-radius: 12px; }
+    @keyframes ring-flash { 0% { box-shadow: 0 0 0 2px rgba(244,63,94,0.7), 0 0 24px -4px rgba(244,63,94,0.6); } 100% { box-shadow: none; } }
+    /* On touch devices the inline globe captures drags for rotation instead of scrolling */
+    @media (pointer: coarse) { #globe-svg { touch-action: none; } }
+    .globe-fs-close {
+      position: absolute; top: 20px; right: 24px; z-index: 80;
+      padding: 10px 16px; background: rgba(15,23,42,0.85);
+      border: 1px solid rgba(56,189,248,0.4); border-radius: 10px;
+      color: rgb(226 232 240); font-size: 13px; cursor: pointer;
+      backdrop-filter: blur(6px); transition: all .15s;
+    }
+    .globe-fs-close:hover { background: rgba(15,23,42,0.95); border-color: rgb(34,211,238); }
+    .globe-fs-info {
+      position: absolute; top: 20px; left: 24px; z-index: 80;
+      padding: 8px 14px; background: rgba(15,23,42,0.6);
+      border: 1px solid rgba(56,189,248,0.25); border-radius: 8px;
+      color: rgb(148 163 184); font-size: 11px;
+      backdrop-filter: blur(4px); font-family: 'JetBrains Mono', monospace;
+    }
+    .globe-fs-info .key { color: rgb(34 211 238); }
+
+    /* Topology */
+    #topology-svg, #mini-topo-svg { background: rgb(2 6 23); border-radius: 12px; cursor: grab; }
+    #topology-svg:active, #mini-topo-svg:active { cursor: grabbing; }
+    .topo-node-bg { fill: rgb(30 41 59); stroke: rgb(51 65 85); stroke-width: 1; }
+    .topo-node-bg.router { fill: rgb(30 58 138); stroke: rgb(59 130 246); }
+    .topo-node-bg.switch { fill: rgb(76 29 149); stroke: rgb(168 85 247); }
+    .topo-node-bg.ap { fill: rgb(6 78 59); stroke: rgb(16 185 129); }
+    .topo-node-bg.internet { fill: rgb(120 53 15); stroke: rgb(245 158 11); }
+    .topo-node-bg.dns { fill: rgb(7 89 133); stroke: rgb(56 189 248); }
+    .topo-node-bg.server { fill: rgb(66 32 6); stroke: rgb(251 191 36); }
+    .topo-node-bg.clients { fill: rgb(30 41 59); stroke: rgb(51 65 85); }
+    .topo-link { stroke: rgb(51 65 85); stroke-width: 1.5; }
+    .topo-link.active { stroke: rgb(56 189 248); stroke-width: 2.5; }
+    .topo-label { fill: rgb(226 232 240); font-size: 12px; font-weight: 600; pointer-events: none; }
+    .topo-detail { fill: rgb(148 163 184); font-size: 10px; pointer-events: none; }
+
+    /* GLOBE — sci-fi blue planet */
+    #globe-svg {
+      background:
+        radial-gradient(circle at 25% 25%, rgba(56, 189, 248, 0.06), transparent 50%),
+        radial-gradient(circle at 70% 70%, rgba(14, 116, 144, 0.08), transparent 50%),
+        radial-gradient(circle at 50% 50%, rgb(8 47 73), rgb(2 6 23));
+      border-radius: 12px;
+      cursor: grab;
+      user-select: none;
+    }
+    #globe-svg:active { cursor: grabbing; }
+    #globe-svg.dragging { cursor: grabbing; }
+    .globe-sphere {
+      fill: url(#oceanGradient);
+      stroke: rgba(56, 189, 248, 0.4);
+      stroke-width: 1;
+      filter: drop-shadow(0 0 24px rgba(56, 189, 248, 0.3));
+    }
+    .globe-atmosphere { fill: none; stroke: rgba(56, 189, 248, 0.25); stroke-width: 1.5; }
+    .globe-graticule { fill: none; stroke: rgba(56, 189, 248, 0.12); stroke-width: 0.4; }
+    .globe-land { fill: rgba(15, 118, 110, 0.7); stroke: rgba(34, 211, 238, 0.55); stroke-width: 0.6; }
+    .globe-home {
+      fill: rgb(52 211 153);
+      filter: drop-shadow(0 0 6px rgb(52 211 153));
+    }
+    .globe-attacker {
+      fill: rgb(248 113 113);
+      opacity: 0.95;
+      filter: drop-shadow(0 0 4px rgb(248 113 113));
+    }
+    .globe-attacker-glow { fill: rgb(244 63 94); opacity: 0.25; }
+    .globe-line { stroke: rgba(248, 113, 113, 0.55); stroke-width: 0.7; fill: none; }
+
+    /* Feed */
+    @keyframes feed-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); }}
+    .feed-item { animation: feed-in 0.3s ease-out; }
+
+    /* Trend arrows */
+    .delta-arrow { display: inline-block; font-weight: 700; }
+
+    /* Heatmap */
+    .heatmap-cell { stroke: rgb(2 6 23); stroke-width: 1; }
+    .heatmap-label { fill: rgb(100 116 139); font-size: 10px; }
+
+    /* Sparkline */
+    .spark { display: block; width: 100%; height: 36px; }
+
+    /* Hero KPI tiles */
+    .kpi-tile {
+      position: relative;
+      background: linear-gradient(135deg, rgba(15,23,42,0.6) 0%, rgba(30,41,59,0.4) 100%);
+      border: 1px solid rgba(51,65,85,0.5);
+      border-radius: 1rem;
+      padding: 1rem 1.25rem;
+      overflow: hidden;
+      transition: border-color .2s;
+    }
+    .kpi-tile:hover { border-color: rgba(100,116,139,0.6); }
+    .kpi-tile-accent { position: absolute; top: 0; left: 0; right: 0; height: 2px; }
+    .kpi-glow {
+      position: absolute; top: -50%; right: -30%; width: 120px; height: 120px;
+      filter: blur(40px); opacity: 0.4; pointer-events: none;
+    }
+
+    /* App icons */
+    .app-icon { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 8px; font-size: 16px; }
+
+    /* Talkers bar */
+    .traffic-bar {
+      height: 6px; background: rgba(30, 41, 59, 0.6); border-radius: 3px; overflow: hidden;
+    }
+
+    /* Health issue chip — info level (FYI, stays green/cyan, not a warning) */
+    .issue-chip-info {
+      border: 1px solid rgba(34, 211, 238, 0.35);
+      background: rgba(6, 182, 212, 0.08);
+    }
+    .issue-chip-info:hover { background: rgba(6, 182, 212, 0.14); }
+
+    /* ======================================================================
+       MOBILE — phones & small tablets (≤768px). Touch-first, no horizontal
+       page scroll, bigger tap targets, swipeable tabs, scrollable tables.
+       ====================================================================== */
+    @media (max-width: 768px) {
+      /* Tighter page padding */
+      .max-w-\[1800px\] { padding: 8px !important; }
+      body { font-size: 13px; }
+
+      /* Header: stack, hide noisy meta, keep brand + live dot */
+      header { padding: 10px 12px !important; }
+      header h1 { font-size: 15px !important; }
+      header .text-\[10px\] { display: none; }           /* server:ip line */
+      header > div:last-child { gap: 10px !important; flex-wrap: wrap; }
+      header > div:last-child > div:nth-child(2),         /* Load */
+      header > div:last-child > div:nth-child(3) { display: none; }  /* Čas */
+
+      /* TAB BAR: horizontal swipe strip, snap, no wrap, no scrollbar */
+      .tab-nav {
+        flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden;
+        -webkit-overflow-scrolling: touch; scroll-snap-type: x mandatory;
+        gap: 4px; padding-bottom: 2px;
+      }
+      .tab-nav::-webkit-scrollbar { display: none; }
+      .tab-nav { scrollbar-width: none; }
+      .tab {
+        flex: 0 0 auto; scroll-snap-align: start;
+        padding: 10px 12px !important; font-size: 13px !important;
+        min-height: 44px;                                 /* iOS tap target */
+      }
+      .tab span:not(.text-\[10px\]) { font-size: 13px; }
+
+      /* HERO: stack the server-stats column under the headline */
+      .hero-inner { padding: 16px !important; }
+      .hero-inner > div { flex-direction: column; gap: 14px !important; }
+      .hero-title { font-size: 20px !important; }
+      .hero-inner .text-right { text-align: left !important; }
+      #health-issues { grid-template-columns: 1fr !important; }
+
+      /* KPI tiles: 1 per row on the smallest screens for readability */
+      .kpi-tile { padding: 14px 16px; }
+      .big-stat { font-size: 30px !important; }
+
+      /* All multi-col grids collapse to single column on phones */
+      .grid { gap: 10px !important; }
+      [class*="lg:grid-cols-"], [class*="md:grid-cols-3"], [class*="xl:grid-cols-"] {
+        grid-template-columns: 1fr !important;
+      }
+      /* keep the 2-up KPI row as 2 cols (still readable) */
+      .grid.grid-cols-2 { grid-template-columns: repeat(2, minmax(0,1fr)) !important; }
+
+      /* TABLES: never break layout — wrap in horizontal scroll, smaller text */
+      table.compact { font-size: 11px; min-width: 0; }
+      table.compact th, table.compact td { padding: 6px 4px; white-space: nowrap; }
+      .scrollbar { -webkit-overflow-scrolling: touch; }
+      /* truncate columns harder so rows fit */
+      td .truncate, td.truncate { max-width: 140px !important; }
+
+      /* VISUALS: scale SVG canvases down for phone height */
+      #globe-svg, #mini-topo-svg { height: 260px !important; }
+      #topology-svg { height: 420px !important; }
+      svg.spark { height: 30px; }
+
+      /* Charts a touch shorter */
+      .h-28, .h-32 { height: 88px !important; }
+
+      /* Modals: full-width sheet feel */
+      .modal { max-width: 100% !important; max-height: 90vh !important; border-radius: 14px; }
+      .modal-bg { padding: 8px !important; align-items: flex-end; }
+      #intel-body .grid-cols-2 { grid-template-columns: 1fr 1fr; }
+
+      /* Period chips + filter chips: bigger tap, wrap nicely */
+      .period-chip, .chip { padding: 7px 12px !important; min-height: 36px; font-size: 12px !important; }
+      #period-chips { gap: 6px; flex-wrap: wrap; }
+
+      /* Globe info hint smaller, fullscreen close bigger tap */
+      .globe-fs-close { padding: 12px 18px; font-size: 14px; }
+      .globe-fs-info { font-size: 10px; max-width: 70vw; }
+
+      /* Feed + lists: comfortable line height for thumb scroll */
+      #feed-list .feed-item { padding: 10px 8px; }
+
+      /* Tooltips: anchor to viewport-safe width */
+      .tip[data-tip]::after { max-width: 78vw; }
+    }
+
+    /* Extra-small phones (≤400px): drop KPI to 1 col, hide sparkline noise */
+    @media (max-width: 400px) {
+      .grid.grid-cols-2 { grid-template-columns: 1fr !important; }
+      header > div:last-child > div:first-child { display: none; }  /* Uptime */
+    }
+  </style>
+</head>
+
+<body class="text-slate-200 bg-grid min-h-screen text-sm">
+
+<div class="max-w-[1800px] mx-auto p-3 md:p-4 space-y-4">
+
+  <!-- HEADER -->
+  <header class="card px-5 py-3 flex flex-wrap items-center justify-between gap-3">
+    <div class="flex items-center gap-3 cursor-pointer hover:opacity-90 transition" onclick="document.querySelector('[data-target=tab-overview]').click(); window.scrollTo({top:0,behavior:'smooth'});" title="Domů (Přehled)">
+      <div class="text-2xl hero-shield">🛡️</div>
+      <div>
+        <h1 class="text-lg font-bold tracking-tight leading-none text-slate-100">
+          {{ app_name }}
+          <span class="text-slate-500 font-normal text-xs ml-1">{{ app_tagline }}</span>
+        </h1>
+        <div class="text-[10px] text-slate-600 mt-0.5 font-mono">{{ hostname }} · {{ server_ip }}</div>
+      </div>
+    </div>
+    <div class="flex items-center gap-4 text-xs">
+      <div><span class="section-label">Uptime</span> <span id="hdr-uptime" class="font-mono text-emerald-300 ml-1" style="font-variant-numeric:tabular-nums">—</span></div>
+      <div title="Load average — průměr CPU fronty za 1 min / 5 min / 15 min. Hodnota nad počtem jader (2) = přetížení.">
+        <span class="section-label">Load <span class="text-[8px] text-slate-600">1m·5m·15m</span></span>
+        <span id="hdr-load" class="font-mono ml-1" style="font-variant-numeric:tabular-nums">—</span>
+      </div>
+      <div><span class="section-label">Čas</span> <span id="hdr-time" class="font-mono ml-1" style="font-variant-numeric:tabular-nums">—</span></div>
+      <div class="flex items-center gap-1.5 text-emerald-300" title="Auto-refresh every 5s, pauses when tab is hidden">
+        <span class="dot dot-ok pulse"></span><span class="text-[11px]">live</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- TAB NAV -->
+  <nav class="tab-nav">
+    <div class="tab active" data-target="tab-overview">🏠 <span>Přehled</span></div>
+    <div class="tab" data-target="tab-security">🚨 <span>Bezpečnost</span> <span id="tab-badge-sec" class="text-[10px] text-rose-300 font-mono"></span></div>
+    <div class="tab" data-target="tab-network">🌐 <span>Síť</span></div>
+    <div class="tab" data-target="tab-dns">🛡️ <span>DNS</span> <span id="tab-badge-dns" class="text-[10px] text-cyan-300 font-mono"></span></div>
+    <div class="tab" data-target="tab-devices">🖥️ <span>Zařízení</span> <span id="tab-badge-dev" class="text-[10px] text-emerald-300 font-mono"></span></div>
+    <div class="tab" data-target="tab-topology">🗺️ <span>Mapa</span></div>
+    <div class="tab" data-target="tab-settings">⚙️ <span>Služby</span></div>
+  </nav>
+
+  <!-- ====================== PŘEHLED ====================== -->
+  <div id="tab-overview" class="tab-content active space-y-4">
+
+    <!-- HERO BANNER -->
+    <div class="hero">
+      <div class="hero-bg"></div>
+      <div class="hero-grad"></div>
+      <div class="hero-inner">
+        <div class="flex flex-wrap items-start justify-between gap-6">
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-3 mb-3">
+              <span id="health-emoji" class="text-5xl">⏳</span>
+              <div>
+                <div id="health-headline" class="hero-title text-2xl md:text-3xl leading-tight">Načítám stav…</div>
+                <div id="health-sub" class="text-slate-400 text-sm mt-1">—</div>
+              </div>
+            </div>
+            <div id="health-issues" class="flex flex-wrap gap-2 mt-4"></div>
+          </div>
+          <div class="text-right">
+            <div class="section-label text-slate-400">Server NetWatch</div>
+            <div class="space-y-1 mt-2 text-xs">
+              <div class="flex items-center gap-2 justify-end"><span class="text-slate-400">CPU</span><span id="sys-cpu" class="font-mono text-slate-200 w-12 text-right">—</span></div>
+              <div class="flex items-center gap-2 justify-end"><span class="text-slate-400">RAM</span><span id="sys-mem" class="font-mono text-slate-200 w-20 text-right">—</span></div>
+              <div class="flex items-center gap-2 justify-end"><span class="text-slate-400">Disk</span><span id="sys-disk" class="font-mono text-slate-200 w-20 text-right">—</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 4 KPI TILES with sparklines and deltas -->
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+
+      <div class="kpi-tile">
+        <div class="kpi-tile-accent" style="background: linear-gradient(90deg, #f43f5e, #fb7185);"></div>
+        <div class="kpi-glow" style="background: #f43f5e;"></div>
+        <div class="flex items-start justify-between mb-1">
+          <div class="section-label text-rose-300">IDS · útoky 24h
+            <span class="tip" data-tip="Počet alertů od Suricata IDS za posledních 24 hodin. ▲ rostoucí trend vs minulý týden = víc útoků, ▼ klesající = klid.">ⓘ</span>
+          </div>
+          <div class="text-xl opacity-50">🚨</div>
+        </div>
+        <div class="flex items-baseline gap-2">
+          <div id="kpi-alerts" class="stat-num text-rose-300">—</div>
+          <div id="kpi-alerts-delta" class="text-xs font-medium">—</div>
+        </div>
+        <div class="text-[11px] text-slate-500 mt-0.5"><span id="kpi-alerts-1h" class="text-amber-300 font-medium">—</span> za poslední hodinu</div>
+        <svg id="spark-alerts" class="spark mt-2"></svg>
+      </div>
+
+      <div class="kpi-tile">
+        <div class="kpi-tile-accent" style="background: linear-gradient(90deg, #f59e0b, #fbbf24);"></div>
+        <div class="kpi-glow" style="background: #f59e0b;"></div>
+        <div class="flex items-start justify-between mb-1">
+          <div class="section-label text-amber-300">Firewall · drops 24h
+            <span class="tip" data-tip="MikroTik firewall zablokoval X paketů za 24h. Většinou WAN scanners.">ⓘ</span>
+          </div>
+          <div class="text-xl opacity-50">🚧</div>
+        </div>
+        <div class="flex items-baseline gap-2">
+          <div id="kpi-drops" class="stat-num text-amber-300">—</div>
+          <div id="kpi-drops-delta" class="text-xs font-medium">—</div>
+        </div>
+        <div class="text-[11px] text-slate-500 mt-0.5"><span id="kpi-attackers" class="text-amber-300 font-medium">—</span> unikátních IP (zahozeno firewallem)</div>
+        <svg id="spark-drops" class="spark mt-2"></svg>
+      </div>
+
+      <div class="kpi-tile">
+        <div class="kpi-tile-accent" style="background: linear-gradient(90deg, #10b981, #34d399);"></div>
+        <div class="kpi-glow" style="background: #10b981;"></div>
+        <div class="flex items-start justify-between mb-1">
+          <div class="section-label text-emerald-300">DNS · zablokováno 24h
+            <span class="tip" data-tip="AdGuard zablokoval reklamy/trackery/malware domény. % z celkového počtu dotazů.">ⓘ</span>
+          </div>
+          <div class="text-xl opacity-50">🛡️</div>
+        </div>
+        <div class="flex items-baseline gap-2">
+          <div id="kpi-dns" class="stat-num text-emerald-300">—</div>
+          <span id="kpi-dns-rate" class="text-xs text-emerald-200 font-medium">—%</span>
+        </div>
+        <div class="text-[11px] text-slate-500 mt-0.5">z <span id="kpi-dns-q">—</span> DNS dotazů</div>
+        <div class="traffic-bar mt-3">
+          <div id="kpi-dns-bar" class="h-full bg-gradient-to-r from-emerald-500 to-teal-400" style="width:0%"></div>
+        </div>
+      </div>
+
+      <div class="kpi-tile">
+        <div class="kpi-tile-accent" style="background: linear-gradient(90deg, #06b6d4, #67e8f9);"></div>
+        <div class="kpi-glow" style="background: #06b6d4;"></div>
+        <div class="flex items-start justify-between mb-1">
+          <div class="section-label text-cyan-300">Zařízení online
+            <span class="tip" data-tip="Aktuálně online v tvé síti. Skládá ze 4 zdrojů: UniFi clients, DHCP leases, ARP, UniFi infra.">ⓘ</span>
+          </div>
+          <div class="text-xl opacity-50">🖥️</div>
+        </div>
+        <div class="flex items-baseline gap-2">
+          <div id="kpi-devices" class="stat-num text-cyan-300">—</div>
+          <div id="kpi-devices-delta" class="text-xs font-medium">—</div>
+        </div>
+        <div class="text-[11px] text-slate-500 mt-0.5">📶 <span id="kpi-wifi">—</span> WiFi · 🔌 <span id="kpi-wired">—</span> drát · 🛰️ <span id="kpi-infra">—</span> infra</div>
+      </div>
+    </div>
+
+    <!-- ROW 2: Mini Topology + Globe — side by side -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+    <div class="card p-4">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="text-sm font-semibold text-slate-100">🗺️ Tvá síť · živá mapa
+          <span class="tip" data-tip="Hierarchie sítě zleva doprava: Internet → MikroTik → switche → APéčka → klienti. Klikni pro detail. Větší mapa je v tabu Mapa.">ⓘ</span>
+        </h2>
+        <button class="chip" onclick="document.querySelector('[data-target=tab-topology]').click()">Detail →</button>
+      </div>
+      <svg id="mini-topo-svg" width="100%" height="300"></svg>
+      <div class="text-[10px] text-slate-600 mt-1 text-center">🖱️ tažení = posun · 🖲️ scroll = zoom · 2× klik = reset · „Detail →" otevře velkou mapu</div>
+    </div>
+
+    <!-- Globe -->
+    <div class="card p-4">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="text-sm font-semibold text-slate-100">🌐 Geolokace útoků · 24h
+          <span class="tip" data-tip="Levým tlačítkem otáčíš · kolečkem zoom · klikni na bod pro threat intel · klikni na ⛶ pro fullscreen. Velikost bodu = počet pokusů, čára = trajektorie útoku k nám.">ⓘ</span>
+        </h2>
+        <div class="flex items-center gap-2">
+          <span id="globe-count" class="text-[10px] text-slate-500 font-mono">— attackers</span>
+          <button class="chip" id="globe-reset" title="Resetovat zoom & rotaci">⟲</button>
+          <button class="chip" id="globe-expand" title="Fullscreen" style="background:rgba(6,182,212,0.15);color:rgb(34,211,238);border:1px solid rgba(34,211,238,0.4);">⛶ fullscreen</button>
+        </div>
+      </div>
+      <svg id="globe-svg" width="100%" height="320"></svg>
+      <div class="text-[10px] text-slate-600 mt-1 text-center">🖱️ drag = rotace · 🖲️ scroll = zoom · klik na bod = threat intel</div>
+    </div>
+    </div>
+
+    <!-- ROW 3: Top Talkers + Feed -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div class="card p-4" style="border-top: 2px solid #06b6d4; box-shadow: inset 0 0 0 1px rgba(6,182,212,0.15), 0 0 32px -10px rgba(6,182,212,0.4);">
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="text-sm font-semibold text-cyan-100">🌐 Internet (WAN) · <span id="inet-month">tento měsíc</span>
+            <span class="tip" data-tip="Reálný internetový provoz měřený přímo na WAN portu routeru (ether5) — autoritativní zdroj. „Tento měsíc" je součet od 1. dne, takže na začátku měsíce bývá menší než okno 24h/30d (to je správně, ne chyba). ↓ = staženo, ↑ = nahráno.">ⓘ</span>
+          </h2>
+          <span class="text-[10px] text-cyan-400 font-mono">router · ether5</span>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div class="p-3 rounded-lg bg-slate-800/40 border-l-2 border-emerald-500/50">
+            <div class="text-[10px] text-slate-500 uppercase tracking-wider">↓ Staženo</div>
+            <div class="big-stat text-emerald-300" id="inet-mtd-down">—</div>
+          </div>
+          <div class="p-3 rounded-lg bg-slate-800/40 border-l-2 border-cyan-500/50">
+            <div class="text-[10px] text-slate-500 uppercase tracking-wider">↑ Nahráno</div>
+            <div class="big-stat text-cyan-300" id="inet-mtd-up">—</div>
+          </div>
+        </div>
+        <div class="mt-3 flex items-center justify-between text-[11px]">
+          <span class="text-slate-500">minulý měsíc</span>
+          <span class="font-mono text-slate-300" id="inet-last">—</span>
+        </div>
+        <div class="mt-1 flex items-center justify-between text-[11px]">
+          <span class="text-slate-500">🔐 VPN tento měsíc</span>
+          <span class="font-mono text-emerald-300/80" id="inet-vpn">—</span>
+        </div>
+        <div class="mt-2 pt-2 border-t border-slate-800/60 grid grid-cols-2 gap-2 text-[11px]">
+          <div><span class="text-slate-500">Ø / den</span> <span class="font-mono text-slate-300" id="inet-avg">—</span></div>
+          <div class="text-right"><span class="text-slate-500">odhad na měsíc</span> <span class="font-mono text-cyan-300" id="inet-proj">—</span></div>
+        </div>
+        <div class="mt-2 h-16"><canvas id="chart-inet-daily"></canvas></div>
+        <div class="text-[9px] text-slate-600 mt-1 text-center">spotřeba WAN po dnech · ↓ staženo / ↑ nahráno</div>
+      </div>
+
+      <div class="card p-4">
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="text-sm font-semibold text-slate-100">📰 Co se právě teď děje
+            <span class="tip" data-tip="Lidsky popsané události za posledních pár hodin. Klikni na IP pro threat intel.">ⓘ</span>
+          </h2>
+          <div class="flex items-center gap-2">
+            <span class="text-[10px] text-slate-500" id="feed-meta">—</span>
+            <button class="chip" id="feed-expand" title="Fullscreen · živě" style="background:rgba(16,185,129,0.15);color:rgb(52,211,153);border:1px solid rgba(52,211,153,0.4);">⛶ živě</button>
+          </div>
+        </div>
+        <div id="feed-list" class="space-y-1.5 overflow-auto scrollbar" style="max-height:340px">
+          <div class="text-slate-500 text-xs py-4 text-center">načítám…</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ROW 3.4: Period selector — drives WAN/LAN/VPN cards + history charts -->
+    <div class="card p-3 flex flex-wrap items-center justify-between gap-3">
+      <div class="flex items-center gap-2">
+        <span class="text-[11px] uppercase tracking-wider text-slate-500 font-semibold">Časové období</span>
+        <div class="flex flex-wrap items-center gap-1" id="period-chips">
+          <button class="period-chip" data-period="1h">1h</button>
+          <button class="period-chip" data-period="6h">6h</button>
+          <button class="period-chip active" data-period="24h">24h</button>
+          <button class="period-chip" data-period="7d">7d</button>
+          <button class="period-chip" data-period="30d">30d</button>
+          <button class="period-chip" data-period="boot">od bootu</button>
+        </div>
+      </div>
+      <div class="text-[10px] text-slate-500" id="period-info">snapshoty každých 5 min · delta-summed</div>
+    </div>
+
+    <!-- ROW 3.5: Provoz WAN/VPN — sjednoceno do jedné karty s filtrem -->
+    <div class="card p-4" style="border-top: 2px solid #06b6d4; box-shadow: inset 0 0 0 1px rgba(6,182,212,0.15), 0 0 32px -10px rgba(6,182,212,0.4);">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="text-sm font-semibold text-cyan-100">📈 Provoz
+          <span class="tip" data-tip="Provoz měřený přímo z routeru: WAN (ether5 = internet) nebo VPN (WireGuard). Filtr přepíná zdroj, časové období nahoře. 'od bootu' = od restartu routeru. ↓ = staženo, ↑ = nahráno.">ⓘ</span>
+        </h2>
+        <div class="flex items-center gap-1" id="traffic-filter">
+          <button class="chip active" data-traffic="wan">🌍 WAN</button>
+          <button class="chip" data-traffic="vpn">🔐 VPN</button>
+        </div>
+      </div>
+      <div class="flex items-baseline gap-2 mb-2">
+        <span class="big-stat text-cyan-300" id="tr-total">—</span>
+        <span class="text-[11px] text-slate-500" id="tr-period-sub">za 24 hodin</span>
+      </div>
+      <div class="grid grid-cols-2 gap-2 mt-2">
+        <div class="p-2 rounded bg-slate-800/40 border-l-2 border-emerald-500/40">
+          <div class="text-[10px] text-slate-500 uppercase">↓ Staženo</div>
+          <div class="font-mono text-emerald-300 text-sm" id="tr-rx">—</div>
+        </div>
+        <div class="p-2 rounded bg-slate-800/40 border-l-2 border-cyan-500/40">
+          <div class="text-[10px] text-slate-500 uppercase">↑ Nahráno</div>
+          <div class="font-mono text-cyan-300 text-sm" id="tr-tx">—</div>
+        </div>
+      </div>
+      <div class="text-[10px] text-slate-500 mt-3" id="tr-ifaces">—</div>
+      <div class="mt-3 h-28"><canvas id="chart-traffic-history"></canvas></div>
+    </div>
+
+    <!-- ROW 3.6: REÁLNÝ per-device internet z NetFlow kolektoru (ADR 0007) -->
+    <div class="card p-4">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="text-sm font-semibold text-slate-100">🏆 Provoz po zařízeních · internet · <span id="dev-inet-period">24h</span>
+          <span class="tip" data-tip="REÁLNÝ per-device internetový provoz z NetFlow v9 (MikroTik Traffic-Flow → kolektor). Download i upload atribuovaný na konkrétní zařízení i přes NAT. Zelená = download, modrá = upload.">ⓘ</span>
+        </h2>
+        <span class="text-[10px] text-slate-500 font-mono" id="dev-inet-meta">—</span>
+      </div>
+      <div id="dev-inet-list" class="space-y-2 max-h-96 overflow-auto scrollbar">
+        <div class="text-slate-500 text-xs py-4 text-center">sbírám NetFlow (první data ~1 min po startu)…</div>
+      </div>
+    </div>
+
+    <!-- ROW 4: Heatmap + Timeline -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      <div class="card p-4 lg:col-span-2">
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="text-sm font-semibold text-slate-100">📈 Alerty a dropy v čase · 24h
+            <span class="tip" data-tip="Hodinové buckety za posledních 24 hodin. Tmavé = klid, světlé = aktivita.">ⓘ</span>
+          </h2>
+        </div>
+        <div class="h-32"><canvas id="chart-timeline"></canvas></div>
+      </div>
+      <div class="card p-4">
+        <h2 class="text-sm font-semibold text-slate-100 mb-3">🔥 Heatmapa · 7 dní × 24h
+          <span class="tip" data-tip="Kdy v týdnu se nejvíc útočí. Tmavé čtverečky = klid, červené = peak aktivity.">ⓘ</span>
+        </h2>
+        <svg id="heatmap-svg" width="100%" height="200"></svg>
+      </div>
+    </div>
+  </div>
+
+  <!-- ====================== BEZPEČNOST ====================== -->
+  <div id="tab-security" class="tab-content space-y-3">
+
+    <!-- Period selector — drives the whole Security tab -->
+    <div class="card p-3 flex flex-wrap items-center justify-between gap-3">
+      <div class="flex items-center gap-2">
+        <span class="text-[11px] uppercase tracking-wider text-slate-500 font-semibold">Časové období</span>
+        <div class="flex flex-wrap items-center gap-1">
+          <button class="period-chip sec-period-chip" data-period="1h">1h</button>
+          <button class="period-chip sec-period-chip" data-period="6h">6h</button>
+          <button class="period-chip sec-period-chip active" data-period="24h">24h</button>
+          <button class="period-chip sec-period-chip" data-period="7d">7d</button>
+          <button class="period-chip sec-period-chip" data-period="30d">30d</button>
+        </div>
+      </div>
+      <div class="text-[10px] text-slate-500">filtruje Výsledek · donuty · země · alerty · škodlivé IP</div>
+    </div>
+
+    <!-- Outcome / dopad (ADR 0005): IDS detekce ↔ firewall verdikt ↔ vystavený povrch -->
+    <div class="card p-4" style="border-top: 2px solid #10b981; box-shadow: inset 0 0 0 1px rgba(16,185,129,0.12), 0 0 32px -10px rgba(16,185,129,0.35);">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="text-sm font-semibold text-emerald-100">🎯 Výsledek · <span class="sec-period-label">24h</span> <span class="text-[9px] text-slate-500 font-normal normal-case">· detekce → potvrzené zahození → dopad</span></h2>
+        <span id="outcome-exposure" class="text-[10px] font-mono text-slate-400">—</span>
+      </div>
+      <div class="grid grid-cols-3 gap-3">
+        <div class="p-3 rounded-lg bg-slate-800/40 border-l-2 border-amber-500/50">
+          <div class="text-[10px] text-slate-500 uppercase tracking-wider">detekováno (IDS)</div>
+          <div class="big-stat text-amber-300" id="outcome-detected">—</div>
+          <div class="text-[10px] text-slate-500" id="outcome-detected-sub">unikátních IP</div>
+        </div>
+        <div class="p-3 rounded-lg bg-slate-800/40 border-l-2 border-rose-500/50">
+          <div class="text-[10px] text-slate-500 uppercase tracking-wider">🛑 potvrzeno zahozeno
+            <span class="tip" data-tip="Kolik z detekovaných IP se zároveň objevilo ve firewall logu MikroTiku. Je to PŘEKRYV dvou nezávislých zdrojů (IDS ↔ log), ne 'úspěšnost blokování'. MikroTik neloguje každé zahození a log se při náporu přepisuje, takže < 100 % je mezera v logování, ne v ochraně.">ⓘ</span>
+          </div>
+          <div class="big-stat text-rose-300" id="outcome-blocked">—</div>
+          <div class="text-[10px] text-slate-500" id="outcome-blocked-sub">—</div>
+        </div>
+        <div class="p-3 rounded-lg bg-slate-800/40 border-l-2 border-emerald-500/50">
+          <div class="text-[10px] text-slate-500 uppercase tracking-wider">✅ prošlo na službu
+            <span class="tip" data-tip="Kolik vnitřních služeb je vystaveno ven (= počet aktivních WAN port-forwardů). 0 = zvenčí není dostupná žádná služba, jediný vstup je WireGuard VPN. Tohle je skutečný 'dopad', ne číslo 87 %.">ⓘ</span>
+          </div>
+          <div class="big-stat text-emerald-300" id="outcome-reached">—</div>
+          <div class="text-[10px] text-slate-500" id="outcome-reached-sub">—</div>
+        </div>
+      </div>
+      <div class="mt-3 text-[11px] text-slate-400" id="outcome-ports"></div>
+    </div>
+
+    <!-- Intent headline (ADR 0004): actionable signal vs blocklist radiation -->
+    <div id="intent-headline" class="flex flex-wrap items-center gap-2 mb-1 text-[11px]">—</div>
+
+    <!-- Audit P1 #5: donut + legend side-by-side, no overflow -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+      <div class="card p-3.5">
+        <h2 class="section-label mb-2">Záměr alertů · <span class="sec-period-label">24h</span> <span class="text-[9px] text-slate-500 font-normal normal-case">· auto-klasifikováno</span></h2>
+        <div class="grid grid-cols-2 gap-2 items-center">
+          <div style="height:160px"><canvas id="chart-categories"></canvas></div>
+          <div id="cat-legend" class="space-y-1 text-[11px] overflow-y-auto scrollbar" style="max-height:160px">—</div>
+        </div>
+      </div>
+      <div class="card p-3.5">
+        <h2 class="section-label mb-2">Závažnost · <span class="sec-period-label">24h</span></h2>
+        <div class="grid grid-cols-2 gap-2 items-center">
+          <div style="height:160px"><canvas id="chart-severity"></canvas></div>
+          <div id="sev-legend" class="space-y-1 text-[11px]">—</div>
+        </div>
+      </div>
+      <div class="card p-3.5">
+        <h2 class="section-label mb-2">Top země útoků</h2>
+        <div id="countries-list" class="space-y-1.5 text-xs scrollbar overflow-y-auto" style="max-height:200px">—</div>
+      </div>
+    </div>
+
+    <!-- Audit P3 #3: Wall of Shame — enriched attackers -->
+    <div class="card p-4">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="text-sm font-semibold text-slate-100">🚩 Škodlivé IP · potvrzeno VT + AbuseIPDB <span class="text-slate-600 font-normal text-[11px]">obohacené z VT + AbuseIPDB</span>
+          <span class="tip" data-tip="IP s threat-intel scóre uloženým v cache. Klepni na dlaždici pro detail. Tier: 🟥 critical (AbuseIPDB ≥80 nebo VT ≥5) · 🟧 high (≥50/≥2) · 🟨 medium (>0/>0) · 🟩 clean.">ⓘ</span>
+        </h2>
+        <div id="wos-counts" class="flex items-center gap-2 text-[10px] font-mono">—</div>
+      </div>
+      <div id="wos-grid" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 max-h-96 overflow-y-auto scrollbar">
+        <div class="text-slate-500 text-xs col-span-4 py-4 text-center">načítám…</div>
+      </div>
+    </div>
+
+    <!-- Audit P3 #1: MikroTik firewall rule hit counts -->
+    <div class="card p-4">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="text-sm font-semibold text-slate-100">🛡️ MikroTik firewall · co zablokoval
+          <span class="tip" data-tip="Pravidla firewallu seřazená tak, že blokující (drop/reject) jsou nahoře. Bytes/pakety = provoz, který pravidlem prošel od restartu routeru.">ⓘ</span>
+          <span id="fw-rules-summary" class="text-[10px] font-mono text-slate-500 ml-2"></span>
+        </h2>
+        <div class="flex items-center gap-1" id="fw-rules-tabs">
+          <button class="chip active" data-fwchain="all">Vše</button>
+          <button class="chip" data-fwchain="input">input</button>
+          <button class="chip" data-fwchain="forward">forward</button>
+          <button class="chip" data-fwchain="output">output</button>
+        </div>
+      </div>
+      <div class="overflow-auto scrollbar" style="max-height:380px">
+        <table class="w-full compact">
+          <thead class="text-[10px] uppercase text-slate-500 border-b border-slate-800 sticky top-0 bg-slate-900">
+            <tr><th class="text-left pl-1">Chain</th><th class="text-left">Action</th><th class="text-left">Komentář</th><th class="text-right">Bytes</th><th class="text-right pr-1">Pakety</th></tr>
+          </thead>
+          <tbody id="fw-rules-body" class="divide-y divide-slate-800/60 text-xs"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
+      <div class="card p-3.5">
+        <div class="flex items-center justify-between mb-2">
+          <h2 class="section-label">Top útočící IP · 24h <span class="text-slate-600 font-normal">(klik = threat intel)</span></h2>
+          <button class="chip" style="background:rgba(244,63,94,0.12);color:#fb7185;border:1px solid rgba(244,63,94,0.35)" onclick="showAllAttackers()">🌍 Všichni útočníci →</button>
+        </div>
+        <div class="overflow-x-auto scrollbar"><table class="w-full compact">
+          <thead class="text-[10px] uppercase text-slate-500 border-b border-slate-800"><tr><th class="text-left pl-1">Zdroj</th><th class="text-left">Země</th><th class="text-left">ASN</th><th class="text-right pr-1">Zásahy</th></tr></thead>
+          <tbody id="top-sources" class="divide-y divide-slate-800/60 text-xs"></tbody>
+        </table></div>
+      </div>
+      <div class="card p-3.5">
+        <h2 class="section-label mb-2">Top signatury · 24h</h2>
+        <div class="overflow-x-auto scrollbar"><table class="w-full compact">
+          <thead class="text-[10px] uppercase text-slate-500 border-b border-slate-800"><tr><th class="text-left pl-1">Signatura</th><th class="text-right pr-1">Zásahy</th></tr></thead>
+          <tbody id="top-sigs" class="divide-y divide-slate-800/60 text-xs"></tbody>
+        </table></div>
+      </div>
+    </div>
+
+    <div class="card p-3.5">
+      <h2 class="section-label mb-2">Nedávné alerty (Suricata IDS)</h2>
+      <div class="overflow-auto scrollbar" style="max-height:380px"><table class="w-full compact">
+        <thead class="text-[10px] uppercase text-slate-500 border-b border-slate-800 sticky top-0 bg-slate-900"><tr><th class="text-left pl-1">Čas</th><th class="text-left">Závaž.</th><th class="text-left">Signatura</th><th class="text-left">Zdroj</th><th class="text-left">→ Cíl</th><th class="text-left">Země / ASN</th></tr></thead>
+        <tbody id="recent-alerts" class="divide-y divide-slate-800/60 text-xs"></tbody>
+      </table></div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
+      <div class="card p-3.5">
+        <h2 class="section-label mb-2">MikroTik firewall · top dropů 24h</h2>
+        <div class="overflow-x-auto scrollbar"><table class="w-full compact">
+          <thead class="text-[10px] uppercase text-slate-500 border-b border-slate-800"><tr><th class="text-left pl-1">Zdroj</th><th class="text-left">Země</th><th class="text-left">Threat</th><th class="text-right pr-1">Dropy</th></tr></thead>
+          <tbody id="fw-top" class="divide-y divide-slate-800/60 text-xs"></tbody>
+        </table></div>
+      </div>
+      <div class="card p-3.5">
+        <h2 class="section-label mb-2">Nedávné firewall dropy</h2>
+        <div class="overflow-auto scrollbar" style="max-height:340px"><table class="w-full compact">
+          <thead class="text-[10px] uppercase text-slate-500 border-b border-slate-800 sticky top-0 bg-slate-900"><tr><th class="text-left pl-1">Čas</th><th class="text-left">Chain</th><th class="text-left">Zdroj</th><th class="text-left">→</th><th class="text-left">Proto</th></tr></thead>
+          <tbody id="fw-recent" class="divide-y divide-slate-800/60 text-xs"></tbody>
+        </table></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ====================== SÍŤ ====================== -->
+  <div id="tab-network" class="tab-content space-y-3">
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
+      <div class="card p-3.5">
+        <div class="flex items-center justify-between mb-2"><h2 class="section-label">MikroTik · stav</h2><span id="mikrotik-version" class="text-[10px] text-slate-500 font-mono">—</span></div>
+        <div class="grid grid-cols-2 gap-3 text-xs">
+          <div class="space-y-1.5">
+            <div class="flex justify-between"><span class="text-slate-400">Board</span><span id="mt-board" class="font-mono text-slate-300">—</span></div>
+            <div class="flex justify-between"><span class="text-slate-400">Uptime</span><span id="mt-uptime" class="font-mono text-slate-300">—</span></div>
+            <div class="flex justify-between"><span class="text-slate-400">Aktivní spojení</span><span id="mt-conn" class="font-mono text-slate-300">—</span></div>
+            <div class="flex justify-between"><span class="text-slate-400">WireGuard peerů</span><span id="mt-wg" class="font-mono text-slate-300">—</span></div>
+          </div>
+          <div class="space-y-2">
+            <div><div class="flex justify-between text-[11px] mb-0.5"><span class="text-slate-400">CPU</span><span id="mt-cpu" class="font-mono">—</span></div><div class="h-1 bg-slate-800 rounded overflow-hidden"><div id="mt-bar-cpu" class="h-full bg-gradient-to-r from-cyan-500 to-blue-500" style="width:0"></div></div></div>
+            <div><div class="flex justify-between text-[11px] mb-0.5"><span class="text-slate-400">RAM</span><span id="mt-mem" class="font-mono">—</span></div><div class="h-1 bg-slate-800 rounded overflow-hidden"><div id="mt-bar-mem" class="h-full bg-gradient-to-r from-violet-500 to-fuchsia-500" style="width:0"></div></div></div>
+            <div><div class="flex justify-between text-[11px] mb-0.5"><span class="text-slate-400">Disk</span><span id="mt-disk" class="font-mono">—</span></div><div class="h-1 bg-slate-800 rounded overflow-hidden"><div id="mt-bar-disk" class="h-full bg-gradient-to-r from-emerald-500 to-teal-500" style="width:0"></div></div></div>
+          </div>
+        </div>
+      </div>
+      <div class="card p-3.5">
+        <h2 class="section-label mb-2">WireGuard tunely</h2>
+        <div id="wg-list" class="space-y-1.5 text-xs scrollbar overflow-y-auto" style="max-height:200px">—</div>
+      </div>
+    </div>
+
+    <div class="card p-3.5">
+      <h2 class="section-label mb-2">MikroTik · rozhraní</h2>
+      <div class="overflow-x-auto scrollbar"><table class="w-full compact">
+        <thead class="text-[10px] uppercase text-slate-500 border-b border-slate-800"><tr><th class="text-left pl-1">Rozhraní</th><th class="text-left">Typ</th><th class="text-left">Stav</th><th class="text-right">RX celkem</th><th class="text-right pr-1">TX celkem</th></tr></thead>
+        <tbody id="mt-interfaces" class="divide-y divide-slate-800/60 text-xs"></tbody>
+      </table></div>
+    </div>
+
+    <div class="card p-3.5">
+      <h2 class="section-label mb-2">Sousední WiFi sítě</h2>
+      <div id="rogue-aps" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-2 text-xs">—</div>
+    </div>
+  </div>
+
+  <!-- ====================== DNS ====================== -->
+  <div id="tab-dns" class="tab-content space-y-3">
+    <div class="card p-3 flex flex-wrap items-center justify-between gap-3">
+      <div class="flex items-center gap-2">
+        <span class="text-[11px] uppercase tracking-wider text-slate-500 font-semibold">Časové období</span>
+        <div class="flex flex-wrap items-center gap-1">
+          <button class="period-chip dns-period-chip" data-period="1h">1h</button>
+          <button class="period-chip dns-period-chip" data-period="6h">6h</button>
+          <button class="period-chip dns-period-chip active" data-period="24h">24h</button>
+          <button class="period-chip dns-period-chip" data-period="7d">7d</button>
+          <button class="period-chip dns-period-chip" data-period="30d">30d</button>
+        </div>
+      </div>
+      <div class="text-[10px] text-slate-500" id="dns-hist-note">vlastní hodinová historie · sbíráme dopředu</div>
+    </div>
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <div class="card p-3.5"><div class="section-label">Dotazy za <span class="dns-period-label">24h</span></div><div id="dns-kpi-q" class="stat-num mt-1 text-cyan-300">—</div><div class="text-[11px] text-slate-400 mt-0.5">přes <span id="dns-kpi-instances">—</span> instance</div></div>
+      <div class="card p-3.5"><div class="section-label">Zablokováno</div><div id="dns-kpi-blocked" class="stat-num mt-1 text-rose-300">—</div><div class="text-[11px] text-slate-400 mt-0.5"><span id="dns-kpi-rate">—</span>% z celkového</div></div>
+      <div class="card p-3.5"><div class="section-label">SafeSearch / SB</div><div id="dns-kpi-safe" class="stat-num mt-1 text-amber-300">—</div><div class="text-[11px] text-slate-400 mt-0.5">SS+SB+parental</div></div>
+      <div class="card p-3.5"><div class="section-label">Avg. čas</div><div id="dns-kpi-time" class="stat-num mt-1 text-emerald-300">—</div><div class="text-[11px] text-slate-400 mt-0.5">milisekund · aktuální 24h</div></div>
+    </div>
+    <div class="card p-3.5">
+      <div class="flex items-center justify-between mb-2">
+        <h2 class="section-label">Dotazy &amp; blokováno v čase · <span class="dns-period-label">24h</span></h2>
+        <span class="text-[10px] text-slate-500">🟦 dotazy · 🟥 blokováno</span>
+      </div>
+      <div class="h-32"><canvas id="chart-dns-history"></canvas></div>
+    </div>
+    <div class="card p-3.5"><h2 class="section-label mb-2">Per instance</h2><div id="dns-instances" class="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">—</div></div>
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-3">
+      <div class="card p-3.5"><h2 class="section-label mb-2">Top blokované domény</h2><div id="dns-top-blocked" class="space-y-1 text-xs scrollbar overflow-y-auto" style="max-height:340px">—</div></div>
+      <div class="card p-3.5"><h2 class="section-label mb-2">Top dotazované domény</h2><div id="dns-top-queried" class="space-y-1 text-xs scrollbar overflow-y-auto" style="max-height:340px">—</div></div>
+      <div class="card p-3.5"><h2 class="section-label mb-2">Top klienti DNS <span class="text-slate-600 font-normal text-[10px]">·  hostname z DHCP</span></h2><div id="dns-top-clients" class="space-y-1 text-xs scrollbar overflow-y-auto" style="max-height:340px">—</div></div>
+    </div>
+
+    <!-- Audit P1 #4: Live DNS stream from AdGuard recent queries -->
+    <div class="card p-4">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="text-sm font-semibold text-slate-100">📡 Live DNS stream
+          <span class="tip" data-tip="Posledních 60 DNS dotazů přes obě AdGuard instance. 🔴 = zablokováno · ⚪ = povolen. Hostname klienta z DHCP, klikni na klienta pro filtr.">ⓘ</span>
+        </h2>
+        <div class="flex items-center gap-2">
+          <span id="dns-stream-meta" class="text-[10px] text-slate-500 font-mono">—</span>
+          <div class="flex items-center gap-1">
+            <button class="chip active" data-dnsfilter="all">Vše</button>
+            <button class="chip" data-dnsfilter="blocked">🔴 blokované</button>
+            <button class="chip" data-dnsfilter="allowed">⚪ povolené</button>
+          </div>
+        </div>
+      </div>
+      <div class="overflow-auto scrollbar" style="max-height:420px">
+        <table class="w-full compact">
+          <thead class="text-[10px] uppercase text-slate-500 border-b border-slate-800 sticky top-0 bg-slate-900">
+            <tr><th class="text-left pl-1">Stav</th><th class="text-left">Klient</th><th class="text-left">FQDN</th><th class="text-left">Typ</th><th class="text-right">ms</th><th class="text-right pr-1">Reason</th></tr>
+          </thead>
+          <tbody id="dns-stream" class="divide-y divide-slate-800/60 text-xs"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ====================== ZAŘÍZENÍ ====================== -->
+  <div id="tab-devices" class="tab-content space-y-3">
+    <div class="card p-3.5">
+      <div class="flex items-center justify-between mb-2"><h2 class="section-label">UniFi infrastruktura</h2><span id="unifi-version" class="text-[10px] text-slate-500 font-mono">—</span></div>
+      <div id="unifi-infra" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">—</div>
+    </div>
+    <div class="card p-3.5"><h2 class="section-label mb-2">WiFi klienti per AP</h2><div id="wifi-per-ap" class="space-y-3">—</div></div>
+    <div class="card p-3.5"><h2 class="section-label mb-2">Drátoví klienti per switch</h2><div id="wired-per-sw" class="grid grid-cols-1 lg:grid-cols-2 gap-3">—</div></div>
+    <div class="card p-3.5">
+      <div class="flex items-center justify-between mb-2"><h2 class="section-label">Kompletní inventář</h2>
+        <div class="flex items-center gap-1">
+          <button class="chip active" data-filter="online">Online <span id="inv-c-online" class="text-slate-600">·—</span></button>
+          <button class="chip" data-filter="infra">Infra <span id="inv-c-infra" class="text-slate-600">·—</span></button>
+          <button class="chip" data-filter="all">Vše <span id="inv-c-all" class="text-slate-600">·—</span></button>
+        </div>
+      </div>
+      <div class="overflow-auto scrollbar" style="max-height:520px"><table class="w-full compact">
+        <thead class="text-[10px] uppercase text-slate-500 border-b border-slate-800 sticky top-0 bg-slate-900"><tr>
+          <th class="text-left pl-1 sortable" data-sortkey="online">Stav<span class="sort-arrow"></span></th>
+          <th class="text-left sortable sort-asc" data-sortkey="hostname">Hostname<span class="sort-arrow"></span></th>
+          <th class="text-left sortable" data-sortkey="ip">IP<span class="sort-arrow"></span></th>
+          <th class="text-left sortable" data-sortkey="mac">MAC<span class="sort-arrow"></span></th>
+          <th class="text-left sortable" data-sortkey="vendor">Vendor<span class="sort-arrow"></span></th>
+          <th class="text-left sortable" data-sortkey="uplink">Připojeno přes<span class="sort-arrow"></span></th>
+          <th class="text-left sortable" data-sortkey="client_type">Typ<span class="sort-arrow"></span></th>
+        </tr></thead>
+        <tbody id="inventory-table" class="divide-y divide-slate-800/60 text-xs"></tbody>
+      </table></div>
+    </div>
+  </div>
+
+  <!-- ====================== MAPA ====================== -->
+  <div id="tab-topology" class="tab-content space-y-3">
+    <div class="card p-3.5">
+      <div class="flex items-center justify-between mb-2"><h2 class="text-sm font-semibold text-slate-200">Topologie sítě · interaktivní</h2>
+        <div class="flex items-center gap-2 text-[10px] text-slate-500"><span><span class="dot dot-ok"></span> online</span><span><span class="dot dot-bad"></span> offline</span><button class="chip ml-2" id="topo-reset">Reset zoom</button></div>
+      </div>
+      <svg id="topology-svg" width="100%" height="700"></svg>
+      <div id="topo-detail" class="mt-3 text-xs text-slate-500">Klepni na uzel v mapě pro detail.</div>
+    </div>
+  </div>
+
+  <!-- ====================== SLUŽBY ====================== -->
+  <div id="tab-settings" class="tab-content space-y-3">
+    <div class="card p-4">
+      <h2 class="text-base font-semibold text-slate-100 mb-3">Co tu vlastně běží?<span class="text-xs text-slate-500 font-normal ml-2">Detail jednotlivých služeb</span></h2>
+      <div id="services-detail" class="grid grid-cols-1 md:grid-cols-2 gap-3"></div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
+      <div class="card p-4">
+        <h2 class="section-label mb-2">ntfy push notifikace</h2>
+        <div class="space-y-2 text-xs">
+          <div><div class="text-slate-400 mb-1">URL serveru:</div><code class="block px-2 py-1.5 bg-slate-800 rounded font-mono text-emerald-300">http://{{ server_ip }}:8090</code></div>
+          <div><div class="text-slate-400 mb-1">Topic pro alerty:</div><code class="block px-2 py-1.5 bg-slate-800 rounded font-mono">mikrotiktraffic-security</code></div>
+          <div><div class="text-slate-400 mb-1">Topic pro info:</div><code class="block px-2 py-1.5 bg-slate-800 rounded font-mono">mikrotiktraffic-info</code></div>
+          <div class="flex gap-2 mt-3"><a class="flex-1 text-center px-3 py-2 rounded bg-slate-800/60 hover:bg-slate-800 text-slate-200" target="_blank" href="https://play.google.com/store/apps/details?id=io.heckel.ntfy">Android</a><a class="flex-1 text-center px-3 py-2 rounded bg-slate-800/60 hover:bg-slate-800 text-slate-200" target="_blank" href="https://apps.apple.com/us/app/ntfy/id1625396347">iOS</a></div>
+        </div>
+      </div>
+      <div class="card p-4">
+        <h2 class="section-label mb-2">Pravidla notifikací</h2>
+        <div class="space-y-1.5 text-xs">
+          <div class="flex items-start gap-2 p-2 rounded bg-slate-800/30"><span class="text-rose-400 text-lg">🚨</span><div><div class="font-medium text-slate-200">Kritický burst</div><div class="text-[10px] text-slate-500">≥3 IP hitují kritickou signaturu za 10 min</div></div></div>
+          <div class="flex items-start gap-2 p-2 rounded bg-slate-800/30"><span class="text-rose-400 text-lg">🚩</span><div><div class="font-medium text-slate-200">Škodlivá IP útočí</div><div class="text-[10px] text-slate-500">AbuseIPDB ≥80 nebo VT ≥5</div></div></div>
+          <div class="flex items-start gap-2 p-2 rounded bg-slate-800/30"><span class="text-emerald-400 text-lg">📱</span><div><div class="font-medium text-slate-200">Nové zařízení</div><div class="text-[10px] text-slate-500">Nová MAC (info topic, cooldown 24h)</div></div></div>
+          <div class="flex items-start gap-2 p-2 rounded bg-slate-800/30"><span class="text-rose-400 text-lg">❌</span><div><div class="font-medium text-slate-200">Služba spadla</div><div class="text-[10px] text-slate-500">Suricata/ntopng/EveBox/TZSP neaktivní</div></div></div>
+          <div class="flex items-start gap-2 p-2 rounded bg-slate-800/30"><span class="text-amber-400 text-lg">🚧</span><div><div class="font-medium text-slate-200">Firewall drop spike</div><div class="text-[10px] text-slate-500">>100 dropů z jedné IP za 10 min</div></div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card p-4">
+      <h2 class="section-label mb-2">Rychlé odkazy</h2>
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-2">
+        <a href="http://{{ server_ip }}:{{ ntopng_port }}/" target="_blank" class="flex items-center justify-between px-3 py-2 rounded-lg bg-slate-800/40 hover:bg-slate-800 transition border border-slate-800 group"><div><div class="font-medium text-slate-100 text-xs">ntopng</div><div class="text-[10px] text-slate-500">analyzátor toků · :{{ ntopng_port }}</div></div><span class="text-cyan-300 opacity-0 group-hover:opacity-100 transition text-sm">→</span></a>
+        <a href="http://{{ server_ip }}:{{ evebox_port }}/" target="_blank" class="flex items-center justify-between px-3 py-2 rounded-lg bg-slate-800/40 hover:bg-slate-800 transition border border-slate-800 group"><div><div class="font-medium text-slate-100 text-xs">EveBox</div><div class="text-[10px] text-slate-500">prohlížeč alertů · :{{ evebox_port }}</div></div><span class="text-cyan-300 opacity-0 group-hover:opacity-100 transition text-sm">→</span></a>
+        <a href="http://{{ server_ip }}:8090/" target="_blank" class="flex items-center justify-between px-3 py-2 rounded-lg bg-slate-800/40 hover:bg-slate-800 transition border border-slate-800 group"><div><div class="font-medium text-slate-100 text-xs">ntfy</div><div class="text-[10px] text-slate-500">push notifikace · :8090</div></div><span class="text-cyan-300 opacity-0 group-hover:opacity-100 transition text-sm">→</span></a>
+      </div>
+      <div class="text-[10px] mt-3 pt-3 border-t border-slate-800 text-slate-500 grid grid-cols-2 md:grid-cols-4 gap-2">
+        <div><span>Redis</span><div id="info-redis" class="text-slate-300 font-mono">—</div></div>
+        <div><span>Cached eventy</span><div id="info-cache" class="text-slate-300 font-mono">—</div></div>
+        <div><span>Boot</span><div id="info-boot" class="text-slate-300 font-mono">—</div></div>
+        <div><span>eve.json</span><div id="disk-eve" class="text-slate-300 font-mono">—</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Fullscreen globe -->
+<div id="globe-fullscreen-modal">
+  <button class="globe-fs-close" id="globe-fs-close">✕ zavřít (ESC)</button>
+  <div class="globe-fs-info">
+    <span class="key">🖱️</span> drag = rotace ·
+    <span class="key">🖲️</span> scroll = zoom ·
+    <span class="key">⏎</span> klik bod = threat intel ·
+    <span id="globe-fs-count">—</span>
+  </div>
+  <svg id="globe-fullscreen-svg"></svg>
+</div>
+
+<div id="feed-fullscreen-modal">
+  <button class="globe-fs-close" id="feed-fs-close">✕ zavřít (ESC)</button>
+  <div class="max-w-3xl mx-auto">
+    <div class="flex items-center justify-between mb-3 px-1">
+      <h2 class="text-base font-semibold text-slate-100">📰 Co se právě teď děje · živě</h2>
+      <span class="text-[11px] text-emerald-400 font-mono flex items-center gap-1.5"><span class="live-dot"></span><span id="feed-fs-meta">—</span></span>
+    </div>
+    <div id="feed-fs-list" class="space-y-1.5 overflow-auto scrollbar pr-1" style="max-height: calc(100vh - 120px)"></div>
+  </div>
+</div>
+
+<!-- Modals -->
+<div id="intel-modal" class="modal-bg">
+  <div class="modal p-5 space-y-3" onclick="event.stopPropagation()">
+    <div class="flex items-center justify-between"><div><h3 class="text-base font-semibold">Threat intel · <span id="intel-ip" class="font-mono text-cyan-300">—</span></h3><div id="intel-sub" class="text-xs text-slate-500"></div></div><button class="text-slate-400 hover:text-slate-100 text-xl" onclick="document.getElementById('intel-modal').classList.remove('show')">✕</button></div>
+    <div id="intel-body" class="space-y-3"></div>
+  </div>
+</div>
+<div id="attackers-modal" class="modal-bg">
+  <div class="modal p-5 space-y-3" onclick="event.stopPropagation()">
+    <div class="flex items-center justify-between"><div><h3 class="text-base font-semibold">Škodlivé IP · 24h</h3><div class="text-xs text-slate-500" id="attackers-sub">—</div></div><button class="text-slate-400 hover:text-slate-100 text-xl" onclick="document.getElementById('attackers-modal').classList.remove('show')">✕</button></div>
+    <div id="attackers-body"></div>
+  </div>
+</div>
+
+<!-- Big "all attackers" view — who attacks me and from where -->
+<div id="allatk-modal" class="modal-bg">
+  <div class="modal p-5 space-y-3" style="max-width: 1100px" onclick="event.stopPropagation()">
+    <div class="flex items-center justify-between">
+      <div>
+        <h3 class="text-base font-semibold">🌍 Kdo na mě útočí a odkud · <span id="allatk-window">24h</span></h3>
+        <div class="text-xs text-slate-500" id="allatk-sub">—</div>
+      </div>
+      <div class="flex items-center gap-2">
+        <div class="flex items-center gap-1" id="allatk-range">
+          <button class="chip active" data-h="24">24h</button>
+          <button class="chip" data-h="168">7d</button>
+          <button class="chip" data-h="720">30d</button>
+        </div>
+        <button class="text-slate-400 hover:text-slate-100 text-xl" onclick="document.getElementById('allatk-modal').classList.remove('show')">✕</button>
+      </div>
+    </div>
+    <!-- Country leaderboard -->
+    <div>
+      <div class="section-label mb-1">Země původu</div>
+      <div id="allatk-countries" class="flex flex-wrap gap-1.5">—</div>
+    </div>
+    <!-- Sort chips -->
+    <div class="flex items-center gap-1 text-[10px]">
+      <span class="text-slate-500 mr-1">Řadit:</span>
+      <button class="chip active" data-sort="total">Celkem zásahů</button>
+      <button class="chip" data-sort="ids_hits">IDS alerty</button>
+      <button class="chip" data-sort="fw_hits">Firewall dropy</button>
+      <button class="chip" data-sort="threat">Threat skóre</button>
+    </div>
+    <!-- Full table -->
+    <div class="overflow-auto scrollbar" style="max-height:55vh">
+      <table class="w-full compact">
+        <thead class="text-[10px] uppercase text-slate-500 border-b border-slate-800 sticky top-0 bg-slate-900">
+          <tr>
+            <th class="text-left pl-1">#</th><th class="text-left">IP</th><th class="text-left">Země / Město</th>
+            <th class="text-left">ASN / ISP</th><th class="text-right">IDS</th><th class="text-right">Firewall</th>
+            <th class="text-right">Threat</th><th class="text-right pr-1">Naposledy</th>
+          </tr>
+        </thead>
+        <tbody id="allatk-body" class="divide-y divide-slate-800/60 text-xs"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+// XSS guard — escape any externally-sourced string before innerHTML interpolation.
+// Sources we don't control: DNS query names, Suricata signatures, MikroTik/WG comments,
+// DHCP hostnames, UniFi names, AdGuard domains, VT/Abuse ISP strings.
+const ESC_MAP = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+const esc = s => (s == null ? "" : String(s).replace(/[&<>"']/g, c => ESC_MAP[c]));
+const fmtBytes = n => n < 1024 ? n+" B" : n < 1024**2 ? (n/1024).toFixed(1)+" KB" : n < 1024**3 ? (n/1024**2).toFixed(1)+" MB" : (n/1024**3).toFixed(2)+" GB";
+const fmtNum = n => (typeof n === "number" ? n : 0).toLocaleString("cs-CZ");
+const sevColor = s => ({1:"text-rose-400",2:"text-amber-400",3:"text-sky-400"}[s] || "text-slate-400");
+const sevDot = s => ({1:"bg-rose-500",2:"bg-amber-500",3:"bg-sky-500"}[s] || "bg-slate-500");
+
+// === Tabs ===
+document.querySelectorAll(".tab").forEach(t => {
+  t.addEventListener("click", () => {
+    document.querySelectorAll(".tab").forEach(x => x.classList.remove("active"));
+    document.querySelectorAll(".tab-content").forEach(x => x.classList.remove("active"));
+    t.classList.add("active");
+    $(t.dataset.target).classList.add("active");
+    try { localStorage.setItem("nw_tab", t.dataset.target); } catch (e) {}
+  });
+});
+
+let invFilter = "online", invDevices = [];
+let invSortKey = "hostname", invSortDir = "asc";
+document.querySelectorAll(".chip[data-filter]").forEach(c => {
+  c.addEventListener("click", () => {
+    document.querySelectorAll(".chip[data-filter]").forEach(x => x.classList.remove("active"));
+    c.classList.add("active");
+    invFilter = c.dataset.filter;
+    renderInventory();
+  });
+});
+
+// Audit P0 #7: sortable inventory columns
+document.querySelectorAll("th.sortable[data-sortkey]").forEach(th => {
+  th.addEventListener("click", () => {
+    const key = th.dataset.sortkey;
+    if (invSortKey === key) {
+      invSortDir = invSortDir === "asc" ? "desc" : "asc";
+    } else {
+      invSortKey = key; invSortDir = "asc";
+    }
+    document.querySelectorAll("th.sortable").forEach(t => t.classList.remove("sort-asc","sort-desc"));
+    th.classList.add(invSortDir === "asc" ? "sort-asc" : "sort-desc");
+    renderInventory();
+  });
+});
+
+// Audit P0 #4 + Top 3: universal IP click — delegated handler for any <span data-ip>
+document.body.addEventListener("click", e => {
+  const el = e.target.closest("[data-ip]");
+  if (!el) return;
+  e.preventDefault();
+  showIntel(el.dataset.ip);
+});
+
+// === Charts ===
+Chart.defaults.color = '#94a3b8';
+Chart.defaults.borderColor = 'rgba(148,163,184,0.1)';
+Chart.defaults.font.size = 10;
+Chart.defaults.font.family = 'Inter';
+
+const chartTimeline = new Chart($("chart-timeline"), {
+  type: "bar",
+  data: { labels: [], datasets: [
+    { label: "Alerts", data: [], backgroundColor: "rgba(244,63,94,0.7)", borderRadius: 3, stack: "s" },
+    { label: "Drops", data: [], backgroundColor: "rgba(245,158,11,0.5)", borderRadius: 3, stack: "s" },
+  ]},
+  options: { responsive: true, maintainAspectRatio: false,
+    plugins: { legend: { display: true, position: "top", labels: { boxWidth: 10, font: { size: 10 }} }},
+    scales: { x: { stacked: true, ticks: { font: { size: 9 }}, grid: { display: false }}, y: { stacked: true, beginAtZero: true, ticks: { precision: 0, font: { size: 9 }}}}
+  }
+});
+
+const PALETTE = ["#06b6d4","#a855f7","#f43f5e","#10b981","#f59e0b","#3b82f6","#ec4899","#8b5cf6","#14b8a6","#84cc16"];
+// Intent buckets (ADR 0004): semantic colors + icons keyed by intent, not position.
+const INTENTS = {
+  attack:    { label: "Pokusy o exploit/malware", color: "#f43f5e", icon: "🎯" },
+  scan:      { label: "Skeny portů",              color: "#f59e0b", icon: "🔍" },
+  blocklist: { label: "Blocklist / reputace",     color: "#64748b", icon: "🛡️" },
+  recon:     { label: "Průzkum / info",           color: "#a855f7", icon: "🕵️" },
+  anomaly:   { label: "Protokol / anomálie",      color: "#3b82f6", icon: "📡" },
+  other:     { label: "Ostatní",                  color: "#14b8a6", icon: "▫️" },
+};
+const intentMeta = k => INTENTS[k] || INTENTS.other;
+const chartCategories = new Chart($("chart-categories"), {
+  type: "doughnut", data: { labels: [], datasets: [{ data: [], backgroundColor: PALETTE, borderWidth: 0 }]},
+  options: { responsive: true, maintainAspectRatio: false, cutout: "60%", plugins: { legend: { display: false }}}
+});
+const chartSeverity = new Chart($("chart-severity"), {
+  type: "doughnut", data: { labels: [], datasets: [{ data: [], backgroundColor: ["#f43f5e","#f59e0b","#3b82f6","#64748b"], borderWidth: 0 }]},
+  options: { responsive: true, maintainAspectRatio: false, cutout: "60%", plugins: { legend: { display: false }}}
+});
+
+function signalClass(rssi) { if (rssi == null) return "bg-slate-700"; if (rssi >= -55) return "bg-emerald-500"; if (rssi >= -65) return "bg-cyan-500"; if (rssi >= -75) return "bg-amber-500"; return "bg-rose-500"; }
+function signalPct(rssi) { if (rssi == null) return 0; return Math.max(0, Math.min(100, Math.round((rssi + 90) * 100 / 60))); }
+
+// === Sparkline mini SVG ===
+function renderSpark(svgId, data, color) {
+  const svg = d3.select(`#${svgId}`);
+  svg.selectAll("*").remove();
+  const w = svg.node().clientWidth || 200, h = 36;
+  if (!data || !data.length) return;
+  const x = d3.scaleLinear().domain([0, data.length - 1]).range([2, w - 2]);
+  const max = Math.max(1, d3.max(data));
+  const y = d3.scaleLinear().domain([0, max]).range([h - 2, 4]);
+  const line = d3.line().x((d, i) => x(i)).y(d => y(d)).curve(d3.curveMonotoneX);
+  const area = d3.area().x((d, i) => x(i)).y0(h).y1(d => y(d)).curve(d3.curveMonotoneX);
+  svg.append("path").attr("d", area(data)).attr("fill", color).attr("opacity", 0.15);
+  svg.append("path").attr("d", line(data)).attr("fill", "none").attr("stroke", color).attr("stroke-width", 1.5);
+}
+
+// === Threat intel modal ===
+async function showIntel(ip) {
+  const modal = $("intel-modal");
+  $("intel-ip").textContent = ip;
+  $("intel-sub").textContent = "";
+  $("intel-body").innerHTML = '<div class="text-slate-500 text-xs">Načítám…</div>';
+  modal.classList.add("show");
+  try {
+    const r = await fetch(`/api/enrich/${ip}`).then(x => x.json());
+    const geo = r.geoip || {}, vt = r.vt, ab = r.abuse, hist = r.history || {};
+    let html = `<div class="grid grid-cols-2 gap-3 text-xs">
+      <div class="p-3 rounded bg-slate-800/50"><div class="section-label mb-1">GeoIP</div><div class="font-medium text-slate-200">${esc(geo.country || '?')}${geo.city ? ' · '+esc(geo.city) : ''}</div><div class="text-[10px] text-slate-500 mt-0.5 truncate">${esc(geo.asn_org || '—')} ${geo.asn ? '(AS'+geo.asn+')' : ''}</div></div>
+      <div class="p-3 rounded bg-slate-800/50"><div class="section-label mb-1">Historie u nás · 30d</div><div class="font-mono text-2xl ${hist.hits > 100 ? 'text-rose-300' : hist.hits > 10 ? 'text-amber-300' : 'text-slate-300'}">${fmtNum(hist.hits || 0)}</div><div class="text-[10px] text-slate-500">alertů</div></div>
+    </div>`;
+    if (vt) { const bad = vt.malicious || 0, col = bad >= 5 ? 'text-rose-300' : bad > 0 ? 'text-amber-300' : 'text-emerald-300'; html += `<div class="p-3 rounded bg-slate-800/50"><div class="section-label mb-1">VirusTotal</div><div class="flex items-baseline gap-2"><span class="text-2xl font-mono ${col}">${bad}</span><span class="text-xs text-slate-400">malicious</span></div><div class="text-[10px] text-slate-500 mt-0.5">${esc(vt.country||'?')} · ${esc(vt.as_owner||'')}</div></div>`; }
+    if (ab) { const sc = ab.score || 0, col = sc >= 80 ? 'text-rose-300' : sc >= 50 ? 'text-amber-300' : sc > 0 ? 'text-sky-300' : 'text-emerald-300'; html += `<div class="p-3 rounded bg-slate-800/50"><div class="section-label mb-1">AbuseIPDB</div><div class="flex items-baseline gap-2"><span class="text-2xl font-mono ${col}">${sc}<span class="text-sm text-slate-500">/100</span></span><span class="text-xs text-slate-400">${ab.reports||0} reportů</span></div><div class="text-[10px] text-slate-500 mt-0.5">${esc(ab.country||'?')} · ${esc(ab.isp||'')}</div></div>`; }
+    html += `<div class="flex justify-between text-[10px] text-slate-500 pt-2 border-t border-slate-800"><span>${r.cached ? 'z cache' : 'live lookup'}</span><span>${r.fetched_at ? new Date(r.fetched_at*1000).toLocaleString('cs-CZ') : ''}</span></div>`;
+    $("intel-body").innerHTML = html;
+  } catch (e) { $("intel-body").innerHTML = `<div class="text-rose-400 text-xs">Chyba: ${e.message}</div>`; }
+}
+$("intel-modal").addEventListener("click", e => { if (e.target.id === "intel-modal") e.currentTarget.classList.remove("show"); });
+
+async function showAttackers() {
+  const modal = $("attackers-modal");
+  $("attackers-body").innerHTML = '<div class="text-slate-500 text-xs py-4 text-center">Načítám…</div>';
+  modal.classList.add("show");
+  try {
+    const r = await fetch("/api/known-bad-attackers").then(x => x.json());
+    $("attackers-sub").textContent = `${r.count} útočníků s VT ≥5 nebo AbuseIPDB ≥80`;
+    if (!r.attackers.length) { $("attackers-body").innerHTML = '<div class="text-slate-500 text-xs py-4 text-center">žádné škodlivé IP</div>'; return; }
+    $("attackers-body").innerHTML = r.attackers.map(a => {
+      const ago = a.last_ts ? Math.round((Date.now()/1000 - a.last_ts) / 60) : 0;
+      const ago_txt = ago < 60 ? `před ${ago} min` : `před ${Math.round(ago/60)} h`;
+      const sc = a.abuse_score || 0;
+      return `<div class="p-3 rounded-lg bg-slate-800/40 border border-slate-800 hover:bg-slate-800/60 transition cursor-pointer mb-2" onclick="document.getElementById('attackers-modal').classList.remove('show'); showIntel('${a.ip}')">
+        <div class="flex items-center justify-between gap-2">
+          <div class="min-w-0 flex-1">
+            <div class="flex items-center gap-2 flex-wrap"><span class="font-mono text-sm text-cyan-300">${a.ip}</span><span class="text-xs"><span class="mr-1">${a.flag}</span>${esc(a.country||'?')}</span><span class="pill ${sc>=80?'pill-bad':'pill-warn'}">AbuseIPDB ${sc}/100</span>${a.vt_malicious >= 5 ? `<span class="pill pill-bad">VT ${a.vt_malicious}</span>` : ''}</div>
+            <div class="text-[11px] text-slate-400 mt-1 truncate">${esc(a.isp || '—')}</div>
+            <div class="text-[10px] text-slate-500 mt-0.5">${a.abuse_reports||0} reportů · zdroj: ${esc(a.source)}</div>
+          </div>
+          <div class="text-right"><div class="text-lg font-mono ${a.hits > 100 ? 'text-rose-300' : 'text-amber-300'}">${a.hits}</div><div class="text-[10px] text-slate-500">útoků</div><div class="text-[9px] text-slate-600 mt-1">${ago_txt}</div></div>
+        </div></div>`;
+    }).join("");
+  } catch (e) { $("attackers-body").innerHTML = `<div class="text-rose-400 text-xs">Chyba: ${e.message}</div>`; }
+}
+$("attackers-modal").addEventListener("click", e => { if (e.target.id === "attackers-modal") e.currentTarget.classList.remove("show"); });
+
+// Single ESC dispatcher: close any open .modal-bg (intel, attackers, …). Fullscreen globe has its own.
+document.addEventListener("keydown", e => {
+  if (e.key !== "Escape") return;
+  document.querySelectorAll(".modal-bg.show").forEach(m => m.classList.remove("show"));
+});
+
+function issueClick(level, text) {
+  if (text.includes("škodlivých IP") || text.includes("špatných IP") || text.includes("útočníků se špatnou")) showAllAttackers();
+  else if (text.includes("Suricata") || text.includes("kritických alertů")) document.querySelector("[data-target=tab-security]").click();
+  else if (text.includes("Disk")) document.querySelector("[data-target=tab-settings]").click();
+  else if (text.includes("MikroTik API") || text.includes("UniFi API")) document.querySelector("[data-target=tab-network]").click();
+  else if (text.includes("Služba")) document.querySelector("[data-target=tab-settings]").click();
+}
+
+// === Big "all attackers" view ===
+let allatkData = [], allatkSort = "total", allatkHours = 24;
+function renderAllAtk() {
+  let list = allatkData.slice();
+  const key = allatkSort;
+  list.sort((a, b) => {
+    if (key === "threat") return (b.abuse_score || 0) - (a.abuse_score || 0) || (b.vt_malicious||0) - (a.vt_malicious||0);
+    return (b[key] || 0) - (a[key] || 0);
+  });
+  $("allatk-body").innerHTML = list.length ? list.map((a, i) => {
+    const ago = a.last_ts ? Math.round((Date.now()/1000 - a.last_ts) / 60) : null;
+    const ago_txt = ago == null ? "—" : ago < 60 ? `${ago} min` : ago < 1440 ? `${Math.round(ago/60)} h` : `${Math.round(ago/1440)} d`;
+    const sc = a.abuse_score, vt = a.vt_malicious;
+    const threat = (sc >= 80 || vt >= 5) ? `<span class="pill pill-bad">⚠ ${sc??'?'}/${vt??'?'}</span>`
+                 : (sc != null) ? `<span class="text-[10px] ${sc>=50?'text-amber-300':'text-slate-500'}">${sc}/${vt||0}</span>`
+                 : `<span class="text-[10px] text-slate-600">—</span>`;
+    return `<tr class="hover:bg-slate-800/40 cursor-pointer" onclick="showIntel('${a.ip}')">
+      <td class="pl-1 text-slate-600 font-mono text-[10px]">${i+1}</td>
+      <td class="font-mono text-cyan-300">${a.ip}</td>
+      <td class="text-[11px]"><span class="mr-1">${a.flag}</span>${esc(a.country||'?')}${a.city?`<span class="text-slate-500"> · ${esc(a.city)}</span>`:''}</td>
+      <td class="text-[10px] text-slate-400 truncate max-w-[240px]" title="${esc(a.asn_org||'')}">${a.asn?`AS${a.asn} `:''}${esc((a.asn_org||'').slice(0,30))}</td>
+      <td class="text-right font-mono text-rose-300">${a.ids_hits||''}</td>
+      <td class="text-right font-mono text-amber-300">${a.fw_hits||''}</td>
+      <td class="text-right">${threat}</td>
+      <td class="pr-1 text-right text-[10px] text-slate-500">${ago_txt}</td>
+    </tr>`;
+  }).join("") : '<tr><td colspan="8" class="text-slate-500 text-center py-4 text-[11px]">žádní útočníci v okně</td></tr>';
+}
+async function showAllAttackers() {
+  const modal = $("allatk-modal");
+  modal.classList.add("show");
+  $("allatk-body").innerHTML = '<tr><td colspan="8" class="text-slate-500 text-center py-6 text-xs">Načítám…</td></tr>';
+  try {
+    const r = await fetch(`/api/attackers?hours=${allatkHours}&limit=300`).then(x => x.json());
+    allatkData = r.attackers || [];
+    const wlabel = allatkHours === 24 ? "24h" : allatkHours === 168 ? "7 dní" : "30 dní";
+    $("allatk-window").textContent = wlabel;
+    $("allatk-sub").textContent = `${r.total_ips} unikátních IP · ${fmtNum(r.total_hits)} zásahů (${fmtNum(r.ids_total)} IDS + ${fmtNum(r.fw_total)} firewall)`;
+    const maxc = (r.top_countries[0]||{count:1}).count;
+    $("allatk-countries").innerHTML = (r.top_countries||[]).map(c =>
+      `<span class="pill pill-neutral" style="font-size:11px"><span class="mr-1">${c.flag}</span>${c.code} <span class="text-slate-500 ml-1">${c.count}</span></span>`
+    ).join("") || '<span class="text-slate-500 text-xs">—</span>';
+    renderAllAtk();
+  } catch (e) { $("allatk-body").innerHTML = `<tr><td colspan="8" class="text-rose-400 text-center py-4 text-xs">Chyba: ${e.message}</td></tr>`; }
+}
+// range + sort chips
+document.querySelectorAll("#allatk-range .chip").forEach(c => c.addEventListener("click", () => {
+  document.querySelectorAll("#allatk-range .chip").forEach(x => x.classList.remove("active"));
+  c.classList.add("active"); allatkHours = parseInt(c.dataset.h); showAllAttackers();
+}));
+document.querySelectorAll("#allatk-modal .chip[data-sort]").forEach(c => c.addEventListener("click", () => {
+  document.querySelectorAll("#allatk-modal .chip[data-sort]").forEach(x => x.classList.remove("active"));
+  c.classList.add("active"); allatkSort = c.dataset.sort; renderAllAtk();
+}));
+$("allatk-modal").addEventListener("click", e => { if (e.target.id === "allatk-modal") e.currentTarget.classList.remove("show"); });
+
+// === Delta arrow ===
+function deltaHtml(t) {
+  if (!t || t.delta_pct === null) return '<span class="delta-flat text-xs">·</span>';
+  const arrow = t.direction === "up" ? "▲" : t.direction === "down" ? "▼" : "·";
+  const cls = t.direction === "up" ? "delta-up" : t.direction === "down" ? "delta-down" : "delta-flat";
+  return `<span class="${cls} delta-arrow">${arrow}</span> <span class="${cls}">${Math.abs(t.delta_pct).toFixed(0)}%</span>`;
+}
+
+// === Health banner ===
+function renderHealth(h) {
+  const s = h.status;
+  $("health-emoji").textContent = {ok:"🟢", warn:"🟡", bad:"🔴"}[s.level] || "⏳";
+  $("health-headline").textContent = s.headline;
+  $("health-sub").textContent = s.sub;
+  $("health-issues").innerHTML = s.issues.length
+    ? s.issues.map(i => `<div class="issue-chip issue-chip-${i.level}" onclick='issueClick("${i.level}", ${JSON.stringify(i.text)})'>
+        <div class="flex items-center gap-2"><span class="text-base">${i.icon}</span><span class="text-xs font-medium text-slate-100">${i.text}</span><span class="text-[10px] text-slate-500 ml-1">→</span></div>
+      </div>`).join("")
+    : `<div class="issue-chip issue-chip-ok"><div class="flex items-center gap-2"><span class="text-lg">✅</span><span class="text-xs font-medium text-emerald-200">Nic k vyřízení · systém v klidu</span></div></div>`;
+
+  $("feed-meta").textContent = `${h.feed.length} událostí`;
+  // XSS-safe IP linkify: esc() first (preserves digits/dots), then wrap IPs in clickable span.
+  const linkifyIp = s => esc(s).replace(/(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/g, '<span class="ip-link" data-ip="$1">$1</span>');
+  $("feed-list").innerHTML = h.feed.length
+    ? h.feed.map(e => `<div class="feed-item flex items-start gap-2 p-2 rounded hover:bg-slate-800/30">
+        <div class="text-lg">${e.icon}</div>
+        <div class="flex-1 min-w-0">
+          <div class="flex items-baseline gap-2"><div class="text-xs font-medium text-slate-200">${linkifyIp(e.title)}</div><div class="text-[10px] text-slate-500 whitespace-nowrap">${esc(e.ago)}</div></div>
+          <div class="text-[11px] text-slate-400 mt-0.5">${linkifyIp(e.text)}</div>
+        </div></div>`).join("")
+    : '<div class="text-slate-500 text-xs py-4 text-center">Klid · nic se neděje</div>';
+  lastFeed = h.feed || [];
+  if ($("feed-fullscreen-modal") && $("feed-fullscreen-modal").classList.contains("show")) renderFeedFullscreen();
+}
+
+// === Trends + KPI cards ===
+let lastNow = {};
+function renderTrendsAndNow(now, tr) {
+  lastNow = now;
+  $("kpi-alerts").textContent = fmtNum(now.alerts_24h);
+  $("kpi-alerts-1h").textContent = fmtNum(now.alerts_1h);
+  $("kpi-alerts-delta").innerHTML = deltaHtml(tr.alerts);
+  renderSpark("spark-alerts", tr.spark?.alerts || [], "#f43f5e");
+
+  $("kpi-drops").textContent = fmtNum(now.firewall_drops_24h);
+  $("kpi-attackers").textContent = fmtNum(now.firewall_unique_attackers_24h);
+  $("kpi-drops-delta").innerHTML = deltaHtml(tr.drops);
+  renderSpark("spark-drops", tr.spark?.drops || [], "#f59e0b");
+
+  $("kpi-dns").textContent = fmtNum(now.dns_blocked_24h);
+  $("kpi-dns-rate").textContent = (now.dns_block_rate || 0) + "%";
+  $("kpi-dns-q").textContent = fmtNum(now.dns_queries_24h);
+  $("kpi-dns-bar").style.width = (now.dns_block_rate || 0) + "%";
+
+  $("tab-badge-sec").textContent = now.alerts_1h > 0 ? `(${now.alerts_1h})` : '';
+  $("tab-badge-dns").textContent = now.dns_queries_24h ? `(${(now.dns_queries_24h/1000).toFixed(0)}k)` : '';
+
+  // Timeline with two series (alerts + drops)
+  const labels = Array.from({length: 24}, (_, i) => `${(new Date(Date.now() - (23-i)*3600*1000).getHours()).toString().padStart(2,'0')}:00`);
+  chartTimeline.data.labels = labels;
+  chartTimeline.data.datasets[0].data = tr.spark?.alerts || [];
+  chartTimeline.data.datasets[1].data = tr.spark?.drops || [];
+  chartTimeline.update("none");
+
+  // Heatmap
+  renderHeatmap(tr.heatmap);
+}
+
+function renderHeatmap(hm) {
+  if (!hm) return;
+  const svg = d3.select("#heatmap-svg");
+  svg.selectAll("*").remove();
+  const w = svg.node().clientWidth || 280, h = 180;
+  const cellW = (w - 28) / 24, cellH = (h - 24) / 7;
+  const color = d3.scaleSequential(d3.interpolateInferno).domain([0, Math.max(1, hm.max)]);
+
+  // labels
+  svg.selectAll(".hm-day-label").data(hm.weekdays).enter().append("text")
+    .attr("class", "heatmap-label").attr("x", 0).attr("y", (d, i) => 18 + i * cellH + cellH/2 + 3).text(d => d);
+  // hour labels every 6
+  [0, 6, 12, 18].forEach(hr => {
+    svg.append("text").attr("class", "heatmap-label").attr("x", 28 + hr * cellW + cellW/2).attr("y", 12).attr("text-anchor", "middle").text(hr + "h");
+  });
+
+  hm.grid.forEach((row, wd) => row.forEach((v, hr) => {
+    svg.append("rect")
+      .attr("class", "heatmap-cell")
+      .attr("x", 28 + hr * cellW).attr("y", 18 + wd * cellH)
+      .attr("width", cellW - 1).attr("height", cellH - 1)
+      .attr("fill", v === 0 ? "#1e293b" : color(v))
+      .append("title").text(`${hm.weekdays[wd]} ${hr}:00 — ${v} událostí`);
+  }));
+}
+
+// === MAC → friendly name fallback ===
+function friendlyName(d) {
+  if (d.hostname && d.hostname !== d.mac && !/^[0-9a-fA-F:]{17}$/.test(d.hostname)) return d.hostname;
+  // Hostname is MAC or empty → use vendor + last4 of MAC
+  const last4 = d.mac ? d.mac.replace(/:/g,"").slice(-4) : "";
+  return `${d.vendor || "neznámý"} · ${last4}`;
+}
+
+// === Inventory ===
+function renderInventory() {
+  // Count totals for filter chip pills
+  const totalCount = invDevices.length;
+  const onlineCount = invDevices.filter(d => d.online).length;
+  const infraCount = invDevices.filter(d => d.kind === "infra").length;
+  $("inv-c-online").textContent = "· " + onlineCount;
+  $("inv-c-infra").textContent = "· " + infraCount;
+  $("inv-c-all").textContent = "· " + totalCount;
+
+  let list = invDevices.slice();
+  if (invFilter === "online") list = list.filter(d => d.online);
+  else if (invFilter === "infra") list = list.filter(d => d.kind === "infra");
+
+  // Audit P0 #7: sort
+  const dir = invSortDir === "asc" ? 1 : -1;
+  list.sort((a, b) => {
+    let va = a[invSortKey], vb = b[invSortKey];
+    if (invSortKey === "hostname") { va = friendlyName(a).toLowerCase(); vb = friendlyName(b).toLowerCase(); }
+    if (invSortKey === "ip") {
+      const ipNum = ip => (ip || "").split(".").reduce((s, p) => s * 256 + (parseInt(p, 10) || 0), 0);
+      va = ipNum(a.ip); vb = ipNum(b.ip);
+    }
+    if (va == null) va = "";
+    if (vb == null) vb = "";
+    if (typeof va === "string") va = va.toLowerCase();
+    if (typeof vb === "string") vb = vb.toLowerCase();
+    if (va < vb) return -1 * dir;
+    if (va > vb) return 1 * dir;
+    return 0;
+  });
+
+  $("inventory-table").innerHTML = list.length
+    ? list.map(d => {
+        const ip = d.ip || "—";
+        const hostname = friendlyName(d);
+        const uplink = d.uplink ? d.uplink : (d.kind === "infra" ? "(infra)" : "—");
+        let type = d.kind === "infra" ? `<span class="pill pill-info">${esc(d.infra_model||'infra')}</span>` : d.client_type === "WIRELESS" ? '<span class="pill pill-neutral">📶 WiFi</span>' : d.client_type === "WIRED" ? '<span class="pill pill-neutral">🔌 drát</span>' : '<span class="pill pill-neutral">—</span>';
+        const ipCell = d.ip ? `<span data-ip="${d.ip}" class="ip-link">${d.ip}</span>` : "—";
+        return `<tr class="hover:bg-slate-800/30"><td class="pl-1"><span class="dot ${d.online?'dot-ok':'dot-off'}"></span></td><td class="text-[11px] text-slate-200 truncate max-w-[200px]" title="${esc(hostname)}">${esc(hostname)}</td><td class="text-[11px] font-mono text-slate-300">${ipCell}</td><td class="text-[10px] font-mono text-slate-500">${d.mac}</td><td class="text-[10px] text-slate-400">${esc(d.vendor || '—')}</td><td class="text-[10px] text-slate-400 truncate max-w-[160px]" title="${esc(uplink)}">${esc(uplink)}</td><td>${type}</td></tr>`;
+      }).join("")
+    : '<tr><td colspan="7" class="text-slate-500 text-center py-4 text-[11px]">žádná zařízení</td></tr>';
+}
+
+// === Talkers ===
+function renderTalkers(d) {
+  const list = d.top_talkers || [];
+  if (!list.length) { $("talkers-list").innerHTML = '<div class="text-slate-500 text-xs py-4 text-center">načítám z ntopng (každých 60 s)…</div>'; return; }
+  const max = Math.max(1, list[0].total_bytes);
+  $("talkers-list").innerHTML = list.map(t => {
+    const tx = t.tx_bytes || 0, rx = t.rx_bytes || 0, total = t.total_bytes || 0;
+    // Friendly name even when only MAC available
+    let name = t.hostname || t.name || t.ip || "?";
+    if (/^[0-9a-fA-F:]{17}$/.test(name)) {
+      const last4 = name.replace(/:/g,"").slice(-4);
+      name = `${t.vendor || "neznámý"} · ${last4}`;
+    }
+    name = name.slice(0, 30);
+    return `<div class="hover:bg-slate-800/30 rounded px-2 py-1.5 cursor-pointer" onclick="document.querySelector('[data-target=tab-devices]').click()">
+      <div class="flex items-center justify-between gap-2 mb-1">
+        <div class="min-w-0 flex-1"><div class="text-xs font-medium text-slate-100 truncate">${esc(name)}</div><div class="text-[9px] text-slate-500 font-mono">${t.ip}</div></div>
+        <div class="text-right"><div class="text-xs font-mono text-cyan-300">${fmtBytes(total)}</div><div class="text-[9px] text-slate-500">↓ ${fmtBytes(rx)} · ↑ ${fmtBytes(tx)} · ${t.active_flows || 0} flows</div></div>
+      </div>
+      <div class="traffic-bar"><div class="h-full bg-gradient-to-r from-cyan-400 to-emerald-400" style="width:${(total/max*100).toFixed(0)}%"></div></div>
+    </div>`;
+  }).join("");
+}
+
+// === Overview backbone ===
+function renderOverview(d) {
+  $("hdr-uptime").textContent = d.uptime;
+  $("hdr-load").textContent = `${d.load["1"]} · ${d.load["5"]} · ${d.load["15"]}`;
+  $("hdr-time").textContent = d.now.split(" ")[1];
+  $("info-boot").textContent = d.boot_time;
+  $("info-cache").textContent = fmtNum(d.logs.events_cached);
+  $("info-redis").textContent = `${d.redis.used_mb}/${d.redis.maxmemory_mb}MB · ${d.redis.keys}k`;
+  $("disk-eve").textContent = d.logs.eve_mb + " MB";
+  $("sys-cpu").textContent = d.cpu_pct + "%";
+  $("sys-mem").textContent = `${d.mem.pct.toFixed(0)}% (${fmtNum(d.mem.used_mb)}M)`;
+  $("sys-disk").textContent = `${d.disk.pct}% (${d.disk.used_gb}G)`;
+
+  $("services-detail").innerHTML = d.services.map(s => {
+    const ok = s.active === "active";
+    return `<div class="p-3 rounded-lg bg-slate-800/40 border border-slate-800">
+      <div class="flex items-center justify-between mb-2"><div class="flex items-center gap-2"><span class="dot ${ok?'dot-ok':'dot-bad'}"></span><span class="font-medium text-slate-100">${s.label}</span></div><span class="text-[10px] text-slate-500 font-mono">${s.unit}</span></div>
+      <div class="text-[11px] text-slate-400 leading-relaxed">${s.description}</div>
+      <div class="text-[10px] text-slate-500 mt-2 flex items-center gap-3">
+        <span>uptime: <span class="font-mono text-slate-300">${s.uptime_str||'?'}</span></span>${s.cpu_pct!=null ? `<span>CPU: <span class="font-mono text-slate-300">${s.cpu_pct}%</span></span>` : ''}${s.mem_mb!=null ? `<span>RAM: <span class="font-mono text-slate-300">${s.mem_mb} MB</span></span>` : ''}
+      </div></div>`;
+  }).join("");
+
+}
+
+// Security tab — donuts, headline, countries, sources, signatures.
+// Period-driven (refreshSecurity); `d` is {alerts:<security-summary>} so this body
+// is identical to the old inline overview block.
+function renderSecurityAlerts(d) {
+  // Intent buckets (ADR 0004) instead of raw Suricata categories
+  const intents = d.alerts.top_intents || [];
+  chartCategories.data.labels = intents.map(c => intentMeta(c.key).label);
+  chartCategories.data.datasets[0].data = intents.map(c => c.count);
+  chartCategories.data.datasets[0].backgroundColor = intents.map(c => intentMeta(c.key).color);
+  chartCategories.update("none");
+  if ($("cat-legend")) $("cat-legend").innerHTML = intents.length
+    ? intents.map(c => { const m = intentMeta(c.key); return `<div class="flex items-center gap-1.5"><span class="dot" style="background:${m.color};box-shadow:0 0 4px ${m.color}"></span><span class="truncate text-slate-300">${m.icon} ${esc(m.label)}</span><span class="font-mono text-slate-500 ml-auto">${c.count}</span></div>`; }).join("")
+    : '<div class="text-slate-500">—</div>';
+  // Headline: actionable signal vs blocklist radiation (klik → seznam ve Wall of Shame)
+  const hl = d.alerts.intent_headline || {};
+  if ($("intent-headline")) $("intent-headline").innerHTML =
+      `<span class="pill" onclick="focusActionable()" title="skeny + pokusy o zneužití zachycené na perimetru — firewall je automaticky dropuje. Klikni pro seznam IP." style="cursor:pointer;background:rgba(244,63,94,0.15);color:#fb7185">🎯 ${fmtNum(hl.actionable||0)} skeny + pokusy o zneužití →</span>`
+    + `<span class="pill" title="threat-intel blocklist radiace na WAN IP — automaticky dropnuto, není třeba řešit jednotlivě" style="background:rgba(100,116,139,0.18);color:#94a3b8">🛡️ ${fmtNum(hl.blocklist||0)} blocklist radiace</span>`
+    + `<span class="pill" style="background:rgba(59,130,246,0.12);color:#93c5fd">📡 ${fmtNum(hl.anomaly||0)} protokol/anomálie</span>`;
+  const sevOrder = ["Kritická", "Vážná", "Méně vážná"];
+  chartSeverity.data.labels = sevOrder;
+  chartSeverity.data.datasets[0].data = sevOrder.map(s => d.alerts.severity[s] || 0);
+  chartSeverity.update("none");
+  const sevCols = ["#f43f5e","#f59e0b","#3b82f6"];
+  if ($("sev-legend")) $("sev-legend").innerHTML = sevOrder.map((s,i) => `<div class="flex items-center gap-1.5"><span class="dot" style="background:${sevCols[i]};box-shadow:0 0 4px ${sevCols[i]}"></span><span class="text-slate-300">${s}</span><span class="font-mono text-slate-500 ml-auto">${d.alerts.severity[s]||0}</span></div>`).join("");
+
+  const total = d.alerts.top_countries.reduce((a,c)=>a+c.count,0) || 1;
+  $("countries-list").innerHTML = d.alerts.top_countries.length
+    ? d.alerts.top_countries.map(c => `<div><div class="flex items-center justify-between mb-0.5"><span><span class="text-sm mr-1">${c.flag}</span>${esc(c.code)}</span><span class="font-mono text-slate-400 text-[11px]">${c.count}</span></div><div class="h-1 bg-slate-800 rounded"><div class="h-full bg-gradient-to-r from-cyan-500 to-blue-500 rounded" style="width:${(c.count/total*100).toFixed(1)}%"></div></div></div>`).join("")
+    : '<div class="text-slate-500 text-[11px]">žádná data</div>';
+
+  $("top-sources").innerHTML = d.alerts.top_sources.length
+    ? d.alerts.top_sources.map(s => `<tr class="hover:bg-slate-800/30"><td class="pl-1 font-mono text-[11px]"><span class="ip-link" onclick="showIntel('${s.ip}')">${s.ip}</span>${s.dropped ? '<span title="zahozeno firewallem" class="ml-1">🛑</span>' : ''}</td><td class="text-[11px]"><span class="mr-1">${s.flag}</span>${esc((s.country||'').slice(0,16))}</td><td class="text-[10px] text-slate-500 truncate max-w-[260px]" title="${esc(s.asn_org||'')}">${esc((s.asn_org||'').slice(0,30))}</td><td class="pr-1 text-right font-mono text-slate-300">${s.count}</td></tr>`).join("")
+    : '<tr><td colspan="4" class="text-slate-500 text-center py-3 text-[11px]">žádné alerty</td></tr>';
+
+  const maxSig = (d.alerts.top_signatures[0]||{count:1}).count;
+  $("top-sigs").innerHTML = d.alerts.top_signatures.length
+    ? d.alerts.top_signatures.map(s => `<tr class="hover:bg-slate-800/30"><td class="pl-1"><div class="text-[11px] text-slate-300 truncate max-w-[280px]" title="${esc(s.signature)}">${esc(s.signature)}</div><div class="h-0.5 bg-slate-800 rounded mt-0.5"><div class="h-full bg-gradient-to-r from-rose-500 to-amber-500 rounded" style="width:${(s.count/maxSig*100).toFixed(1)}%"></div></div></td><td class="pr-1 text-right font-mono text-slate-300">${s.count}</td></tr>`).join("")
+    : '<tr><td colspan="2" class="text-slate-500 text-center py-3 text-[11px]">žádné alerty</td></tr>';
+}
+
+function renderAlerts(alerts) {
+  // Audit P0 #8 + P1 #7: compact rows + signature popovers, P1 #16 universal IP click
+  $("recent-alerts").innerHTML = alerts.length
+    ? alerts.map(a => `<tr class="alert-row hover:bg-slate-800/30">
+        <td class="pl-1 font-mono text-[10px] text-slate-400 whitespace-nowrap"><div>${a.time}</div><div class="text-[9px] text-slate-600">${a.date}</div></td>
+        <td><span class="inline-flex items-center gap-1 text-[10px] ${sevColor(a.severity)}"><span class="dot ${sevDot(a.severity)}"></span>${a.severity_label}</span></td>
+        <td><span class="truncate-expand text-[11px] text-slate-200 block truncate max-w-[340px]" data-full="${esc(a.signature||'')}${a.category ? '  ·  ' + esc(a.category) : ''}">${esc(a.signature)}</span><div class="text-[9px] text-slate-500">${a.intent ? `<span style="color:${intentMeta(a.intent).color}">${intentMeta(a.intent).icon} ${esc(intentMeta(a.intent).label)}</span>` : esc(a.category)}</div></td>
+        <td class="text-[10px] font-mono"><div><span class="ip-link" data-ip="${a.src}">${a.src}</span><span class="text-slate-600">:${a.src_port??''}</span></div><div class="text-[9px] text-slate-500">${a.proto}</div></td>
+        <td class="text-[10px] font-mono"><span class="ip-link text-slate-300" data-ip="${a.dst}">${a.dst}</span><span class="text-slate-600">:${a.dst_port??''}</span></td>
+        <td class="text-[10px]"><div><span class="mr-1">${a.flag}</span>${esc((a.country||'').slice(0,14))}</div><div class="text-[9px] text-slate-500 truncate max-w-[160px]" title="${esc(a.asn_org||'')}">${esc(a.asn_org||'')}</div></td>
+      </tr>`).join("")
+    : '<tr><td colspan="6" class="text-slate-500 text-center py-4 text-[11px]">žádné alerty</td></tr>';
+}
+
+// === Audit P3 #3: Wall of Shame ===
+function renderWallOfShame(d) {
+  $("wos-counts").innerHTML = `
+    <span class="pill pill-bad" style="background:rgba(244,63,94,0.2);color:#f87171">🟥 ${d.critical} potvrzeně zlé</span>
+    <span class="pill pill-warn">🟧 ${d.high} podezřelé</span>
+    <span class="pill pill-neutral">🟨 ${d.medium} hraniční</span>`;
+  const list = d.attackers || [];
+  if (!list.length) { $("wos-grid").innerHTML = '<div class="text-slate-500 text-xs col-span-4 py-4 text-center">žádné enrichmenuté IP</div>'; return; }
+  $("wos-grid").innerHTML = list.map(a => {
+    const ago = a.last_hit ? Math.round((Date.now()/1000 - a.last_hit) / 60) : null;
+    const ago_txt = ago == null ? "—" : ago < 60 ? `před ${ago} min` : ago < 1440 ? `před ${Math.round(ago/60)} h` : `před ${Math.round(ago/1440)} dny`;
+    return `<div class="wos-tile ${a.tier}" data-ip="${a.ip}">
+      <div class="flex items-center justify-between mb-1">
+        <span class="text-[11px] text-cyan-300">${a.ip}</span>
+        <span class="text-[10px]">${a.flag||''}</span>
+      </div>
+      <div class="text-[9px] text-slate-400 truncate" title="${esc(a.isp||'')}">${esc((a.isp||'?').slice(0,28))}</div>
+      <div class="flex items-center gap-2 mt-2 text-[10px]">
+        <span class="${a.abuse_score>=80?'text-rose-300':a.abuse_score>=50?'text-amber-300':'text-slate-400'}">Abuse ${a.abuse_score||0}</span>
+        <span class="${a.vt_malicious>=5?'text-rose-300':a.vt_malicious>=2?'text-amber-300':'text-slate-400'}">VT ${a.vt_malicious||0}</span>
+      </div>
+      <div class="text-[9px] text-slate-500 mt-1">${a.our_hits} u nás · ${ago_txt}</div>
+    </div>`;
+  }).join("");
+}
+
+// === Audit P3 #1: MikroTik firewall rule hits ===
+let fwChainFilter = "all";
+let cachedFwRules = null;
+document.querySelectorAll(".chip[data-fwchain]").forEach(c => {
+  c.addEventListener("click", () => {
+    document.querySelectorAll(".chip[data-fwchain]").forEach(x => x.classList.remove("active"));
+    c.classList.add("active");
+    fwChainFilter = c.dataset.fwchain;
+    if (cachedFwRules) renderFirewallRules(cachedFwRules);
+  });
+});
+function renderFirewallRules(d) {
+  cachedFwRules = d;
+  let rules = (d.rules || []).slice();
+  if (fwChainFilter !== "all") rules = rules.filter(r => r.chain === fwChainFilter);
+  // Lead with what the firewall BLOCKED (drop/reject/tarpit first), then by volume
+  const blockRank = r => (/(drop|reject|tarpit)/.test(r.action) ? 0 : r.action === "accept" ? 2 : 1);
+  rules.sort((a, b) => blockRank(a) - blockRank(b) || b.bytes - a.bytes);
+  if ($("fw-rules-summary")) $("fw-rules-summary").innerHTML =
+    `🛑 ${rules.filter(r => /(drop|reject|tarpit)/.test(r.action)).length} blok. · ✅ ${rules.filter(r => r.action === "accept").length} povol.`;
+  $("fw-rules-body").innerHTML = rules.length
+    ? rules.map(r => {
+        const actCol = /(drop|reject|tarpit)/.test(r.action) ? "text-rose-300" : r.action === "accept" ? "text-emerald-300" : r.action.includes("address-list") ? "text-amber-300" : "text-slate-300";
+        const dead = r.bytes === 0 ? "opacity-50" : "";
+        return `<tr class="hover:bg-slate-800/30 ${dead}">
+          <td class="pl-1 text-[10px] text-slate-300 font-mono">${r.chain}</td>
+          <td class="text-[10px] ${actCol} font-mono">${r.action}</td>
+          <td class="text-[10px] text-slate-400 truncate max-w-[420px]" title="${esc(r.comment)}">${esc(r.comment)}</td>
+          <td class="text-right font-mono text-[10px] text-cyan-300">${fmtBytes(r.bytes)}</td>
+          <td class="text-right pr-1 font-mono text-[10px] text-slate-400">${fmtNum(r.packets)}</td>
+        </tr>`;
+      }).join("")
+    : '<tr><td colspan="5" class="text-slate-500 text-center py-3 text-[11px]">žádná pravidla</td></tr>';
+}
+
+// === Audit P1 #4: AdGuard Live DNS stream ===
+let dnsFilter = "all";
+let cachedDnsRecent = [];
+document.querySelectorAll(".chip[data-dnsfilter]").forEach(c => {
+  c.addEventListener("click", () => {
+    document.querySelectorAll(".chip[data-dnsfilter]").forEach(x => x.classList.remove("active"));
+    c.classList.add("active");
+    dnsFilter = c.dataset.dnsfilter;
+    renderDnsStream();
+  });
+});
+function renderDnsStream() {
+  let list = cachedDnsRecent.slice();
+  if (dnsFilter === "blocked") list = list.filter(q => q.blocked);
+  else if (dnsFilter === "allowed") list = list.filter(q => !q.blocked);
+  $("dns-stream-meta").textContent = `${list.length} / ${cachedDnsRecent.length} dotazů`;
+  $("dns-stream").innerHTML = list.length
+    ? list.map(q => {
+        const client = q.client_hostname ? `${esc(q.client_hostname)}<span class="text-slate-600 font-mono ml-1 text-[9px]">${esc(q.client||'')}</span>` : `<span class="font-mono">${esc(q.client||'?')}</span>`;
+        const qname = esc((q.question && (q.question.name || q.question)) || q.host || "?");
+        const qtype = esc((q.question && q.question.type) || "?");
+        const ms = q.elapsedMs ? parseFloat(q.elapsedMs).toFixed(1) : (q.elapsed_ms ? q.elapsed_ms.toFixed(1) : "?");
+        const reason = esc((q.reason || "").replace(/^(NotFiltered|Filtered)/, "$1 "));
+        return `<tr class="hover:bg-slate-800/30">
+          <td class="pl-1"><span class="dot ${q.blocked?'dot-bad':'dot-ok'}" title="${q.blocked?'blokováno':'povolen'}"></span></td>
+          <td class="text-[10px] truncate max-w-[200px]">${client}</td>
+          <td class="text-[10px] font-mono text-slate-200 truncate max-w-[260px]" title="${qname}">${qname}</td>
+          <td class="text-[10px] text-slate-500">${qtype}</td>
+          <td class="text-right font-mono text-[10px] ${parseFloat(ms)>50?'text-amber-300':'text-emerald-300'}">${ms}</td>
+          <td class="pr-1 text-right text-[9px] text-slate-500 truncate max-w-[140px]" title="${reason}">${reason.slice(0,20)}</td>
+        </tr>`;
+      }).join("")
+    : '<tr><td colspan="6" class="text-slate-500 text-center py-3 text-[11px]">žádné dotazy</td></tr>';
+}
+
+function renderNetwork(d) {
+  const s = d.summary || {};
+  $("kpi-devices").textContent = fmtNum(s.online || 0);
+  $("kpi-wifi").textContent = s.wifi || 0;
+  $("kpi-wired").textContent = s.wired || 0;
+  $("kpi-infra").textContent = `${s.infra_online||0}/${s.infra||0}`;
+  $("tab-badge-dev").textContent = s.online ? `(${s.online})` : '';
+
+  const m = d.mikrotik || {};
+  $("mikrotik-version").textContent = m.version ? `RouterOS ${m.version}` : "—";
+  $("mt-board").textContent = m.board || "—";
+  $("mt-uptime").textContent = m.uptime || "—";
+  const mtCpu = m.cpu_load_pct || 0;
+  $("mt-cpu").textContent = mtCpu + "%"; $("mt-bar-cpu").style.width = mtCpu + "%";
+  const memPct = m.total_memory_mb ? Math.round((1 - m.free_memory_mb / m.total_memory_mb) * 100) : 0;
+  $("mt-mem").textContent = `${memPct}% (${(m.total_memory_mb - m.free_memory_mb).toFixed(0)}/${m.total_memory_mb}M)`; $("mt-bar-mem").style.width = memPct + "%";
+  const diskPct = m.total_hdd_mb ? Math.round((1 - m.free_hdd_mb / m.total_hdd_mb) * 100) : 0;
+  $("mt-disk").textContent = `${diskPct}% (${(m.total_hdd_mb - m.free_hdd_mb).toFixed(0)}/${m.total_hdd_mb}M)`; $("mt-bar-disk").style.width = diskPct + "%";
+  $("mt-conn").textContent = fmtNum(m.connections_active || 0);
+  $("mt-wg").textContent = `${m.wireguard_peers_active || 0} / ${m.wireguard_peers_total || 0}`;
+
+  $("mt-interfaces").innerHTML = (d.interfaces || []).map(i => {
+    const stateCls = i.running ? "dot-ok" : "dot-off";
+    const typeColor = {ether:"text-cyan-300", bridge:"text-violet-300", wg:"text-emerald-300", vlan:"text-amber-300"}[i.type] || "text-slate-400";
+    return `<tr class="hover:bg-slate-800/30"><td class="pl-1"><span class="dot ${stateCls}"></span> <span class="font-mono text-[11px]">${esc(i.name)}</span>${i.comment ? `<span class="text-[9px] text-slate-500 ml-1">${esc(i.comment)}</span>` : ''}</td><td class="text-[10px] ${typeColor} uppercase">${i.type||''}</td><td>${i.running ? '<span class="pill pill-ok">running</span>' : '<span class="pill pill-neutral">down</span>'}</td><td class="text-right font-mono text-[10px] text-slate-300">${fmtBytes(i.rx_byte||0)}</td><td class="pr-1 text-right font-mono text-[10px] text-slate-300">${fmtBytes(i.tx_byte||0)}</td></tr>`;
+  }).join("") || '<tr><td colspan="5" class="text-slate-500 text-center py-3 text-[11px]">žádná data</td></tr>';
+
+  const u = d.unifi || {};
+  $("unifi-version").textContent = u.version ? `Network v${u.version}` : "—";
+  $("unifi-infra").innerHTML = (d.infra || []).map(dev => { const ok = dev.state === "ONLINE"; return `<div class="flex items-center justify-between px-3 py-2 rounded-lg bg-slate-800/40 border border-slate-800"><div class="min-w-0"><div class="flex items-center gap-2"><span class="dot ${ok?'dot-ok':'dot-bad'}"></span><span class="text-sm font-medium text-slate-100 truncate">${esc(dev.name||'?')}</span></div><div class="text-[10px] text-slate-500 mt-0.5">${esc(dev.model||'')} · ${dev.ip||'—'} · ${dev.version||''}</div></div><div class="text-right"><div class="text-base font-mono text-emerald-300">${dev.client_count}</div><div class="text-[10px] text-slate-500">klientů</div></div></div>`; }).join("") || '<div class="text-slate-500 text-[11px] col-span-3">žádná data</div>';
+
+  // Audit P1 #8: WG peers with handshake age color-coded
+  function parseHandshakeAge(s) {
+    if (!s || String(s).includes("never")) return null;
+    // Parse "1m23s", "23s", "1h2m", etc.
+    const str = String(s);
+    let secs = 0;
+    const m = str.match(/(\d+)w/); if (m) secs += parseInt(m[1])*604800;
+    const d = str.match(/(\d+)d/); if (d) secs += parseInt(d[1])*86400;
+    const h = str.match(/(\d+)h/); if (h) secs += parseInt(h[1])*3600;
+    const mn = str.match(/(\d+)m(?!s)/); if (mn) secs += parseInt(mn[1])*60;
+    const sec = str.match(/(\d+)s/); if (sec) secs += parseInt(sec[1]);
+    return secs || null;
+  }
+  $("wg-list").innerHTML = (d.wireguard || []).length
+    ? d.wireguard.map(p => {
+        const age = parseHandshakeAge(p.last_handshake);
+        let dotCls, ageCol, ageTxt;
+        if (age === null) { dotCls = "dot-off"; ageCol = "text-slate-600"; ageTxt = "never"; }
+        else if (age < 120) { dotCls = "dot-ok"; ageCol = "text-cyan-300"; ageTxt = p.last_handshake; }
+        else if (age < 1800) { dotCls = "dot-warn"; ageCol = "text-amber-300"; ageTxt = p.last_handshake; }
+        else { dotCls = "dot-bad"; ageCol = "text-rose-400"; ageTxt = p.last_handshake; }
+        return `<div class="flex items-center justify-between px-2 py-1.5 rounded bg-slate-800/30">
+          <div class="min-w-0 flex-1">
+            <div class="flex items-center gap-1.5"><span class="dot ${dotCls}"></span><span class="text-[11px] text-slate-200 truncate">${esc(p.comment||p.interface)}</span></div>
+            <div class="text-[9px] text-slate-500 font-mono">${esc(p.endpoint||'—')}</div>
+          </div>
+          <div class="text-right text-[9px] font-mono">
+            <div class="${ageCol}">⟲ ${ageTxt}</div>
+            <div class="text-slate-500">↓${fmtBytes(p.rx||0)} · ↑${fmtBytes(p.tx||0)}</div>
+          </div>
+        </div>`;
+      }).join("")
+    : '<div class="text-slate-500 text-[11px]">žádné peery</div>';
+
+  invDevices = d.devices || [];
+  renderInventory();
+
+  // Build mini topology data from network
+  buildMiniTopology(d);
+}
+
+function renderWiFi(d) {
+  $("wifi-per-ap").innerHTML = (d.aps || []).length
+    ? d.aps.map(ap => `<div class="border border-slate-800 rounded-lg p-3 bg-slate-800/20"><div class="flex items-center justify-between mb-2"><div><span class="font-medium text-slate-100">${esc(ap.ap_name)}</span><span class="ml-1 text-[10px] text-slate-500">${esc(ap.ap_model||'')}</span></div><div class="text-[10px] text-slate-500">${ap.client_count} klientů · avg signál ${ap.avg_signal||'?'} dBm</div></div><div class="overflow-x-auto scrollbar"><table class="w-full compact"><thead class="text-[10px] uppercase text-slate-500 border-b border-slate-800/60"><tr><th class="text-left pl-1">Klient</th><th class="text-left">IP</th><th class="text-left">Radio</th><th class="text-left">Signál</th><th class="text-right">TX/RX kbps</th><th class="text-right pr-1">Retries</th></tr></thead><tbody class="divide-y divide-slate-800/40 text-xs">${ap.clients.map(c => `<tr><td class="pl-1 truncate max-w-[180px]" title="${esc(c.hostname)}">${esc((c.hostname||'?').slice(0,22))}</td><td class="font-mono text-[10px] text-slate-400">${c.ip||'—'}</td><td class="text-[10px] text-slate-400">${esc(c.radio||'?')} ch${c.channel||'?'}</td><td><div class="flex items-center gap-1.5"><span class="text-[10px] font-mono ${c.signal>=-55?'text-emerald-300':c.signal>=-65?'text-cyan-300':c.signal>=-75?'text-amber-300':'text-rose-300'}">${c.signal||'?'}</span><div class="w-12 h-1 bg-slate-800 rounded"><div class="h-1.5 rounded ${signalClass(c.signal)}" style="width:${signalPct(c.signal)}%"></div></div></div></td><td class="text-right font-mono text-[10px] text-slate-400">${c.tx_rate_kbps||0}/${c.rx_rate_kbps||0}</td><td class="pr-1 text-right font-mono text-[10px] ${c.tx_retries>1000?'text-amber-300':'text-slate-500'}">${fmtNum(c.tx_retries||0)}</td></tr>`).join("")}</tbody></table></div></div>`).join("")
+    : '<div class="text-slate-500 text-xs">žádná data</div>';
+
+  $("wired-per-sw").innerHTML = (d.switches || []).length
+    ? d.switches.map(sw => `<div class="border border-slate-800 rounded-lg p-3 bg-slate-800/20"><div class="flex items-center justify-between mb-2"><div><span class="font-medium text-slate-100">${esc(sw.sw_name)}</span><span class="ml-1 text-[10px] text-slate-500">${esc(sw.sw_model||'')}</span></div><div class="text-[10px] text-slate-500">${sw.client_count} klientů</div></div><table class="w-full compact text-xs"><thead class="text-[10px] uppercase text-slate-500 border-b border-slate-800/60"><tr><th class="text-left pl-1">Port</th><th class="text-left">Klient</th><th class="text-left">IP</th><th class="text-right pr-1">TX/RX</th></tr></thead><tbody class="divide-y divide-slate-800/40">${sw.clients.map(c => `<tr><td class="pl-1 font-mono text-[10px] text-slate-400">${c.port}</td><td class="truncate max-w-[180px]">${esc((c.hostname||'?').slice(0,24))}</td><td class="font-mono text-[10px] text-slate-500">${c.ip||'—'}</td><td class="pr-1 text-right font-mono text-[10px] text-slate-500">${fmtBytes(c.tx_bytes||0)}/${fmtBytes(c.rx_bytes||0)}</td></tr>`).join("")}</tbody></table></div>`).join("")
+    : '<div class="text-slate-500 text-xs">žádná data</div>';
+
+  $("rogue-aps").innerHTML = (d.rogue_aps || []).length
+    ? d.rogue_aps.slice(0,40).map(r => `<div class="px-2.5 py-1.5 rounded bg-slate-800/30"><div class="text-[11px] text-slate-200 truncate" title="${esc(r.essid||r.bssid||'?')}">${esc(r.essid||'(skrytá)')}</div><div class="text-[10px] text-slate-500 font-mono">${esc(r.bssid||'')} · ch${r.channel||'?'} · ${r.rssi||'?'}dBm</div></div>`).join("")
+    : '<div class="text-slate-500 text-xs">žádné</div>';
+}
+
+function renderFirewall(d) {
+  $("fw-top").innerHTML = (d.top || []).length
+    ? d.top.map(r => { const threat = (r.abuse_score >= 50 || r.vt_malicious >= 3) ? `<span class="pill pill-bad">⚠ ${r.abuse_score||0}/${r.vt_malicious||0}</span>` : (r.abuse_score != null) ? `<span class="text-[10px] text-slate-500">${r.abuse_score}/${r.vt_malicious||0}</span>` : '<span class="text-[10px] text-slate-600">—</span>'; return `<tr class="hover:bg-slate-800/30"><td class="pl-1 font-mono text-[11px]"><span class="ip-link" onclick="showIntel('${r.src_ip}')">${r.src_ip}</span></td><td class="text-[11px]"><span class="mr-1">${r.flag||'🌐'}</span>${esc((r.country||'').slice(0,14))}</td><td>${threat}</td><td class="pr-1 text-right font-mono text-slate-300">${r.hits}</td></tr>`; }).join("")
+    : '<tr><td colspan="4" class="text-slate-500 text-center py-3 text-[11px]">žádné dropy zaznamenány</td></tr>';
+  $("fw-recent").innerHTML = (d.recent || []).length
+    ? d.recent.map(r => { const t = r.ts ? new Date(r.ts*1000).toLocaleTimeString('cs-CZ') : '—'; return `<tr class="hover:bg-slate-800/30"><td class="pl-1 font-mono text-[10px] text-slate-400">${t}</td><td class="text-[10px] text-slate-300">${r.chain||'—'}</td><td class="font-mono text-[10px]"><span class="ip-link" onclick="showIntel('${r.src_ip}')">${r.src_ip||'?'}</span><span class="text-slate-600">:${r.src_port||''}</span></td><td class="font-mono text-[10px] text-slate-500">${r.dst_ip||'?'}:${r.dst_port||''}</td><td class="text-[10px] text-slate-400">${r.proto||'?'}</td></tr>`; }).join("")
+    : '<tr><td colspan="5" class="text-slate-500 text-center py-3 text-[11px]">žádné dropy</td></tr>';
+}
+
+function renderDNS(d) {
+  if (!d.configured) { $("dns-instances").innerHTML = '<div class="text-slate-500 text-xs col-span-2">AdGuard nedostupný</div>'; return; }
+  // Cache for live stream filter
+  cachedDnsRecent = d.recent_queries || [];
+  renderDnsStream();
+  const m = d.merged;
+  $("dns-kpi-q").textContent = fmtNum(m.queries_24h);
+  $("dns-kpi-instances").textContent = `${m.instances_running}/${m.instances_total}`;
+  $("dns-kpi-blocked").textContent = fmtNum(m.blocked_24h);
+  $("dns-kpi-rate").textContent = m.block_rate_pct;
+  $("dns-kpi-safe").textContent = fmtNum(m.safesearch_24h + m.safebrowsing_24h + m.parental_24h);
+  $("dns-kpi-time").textContent = (m.avg_processing_s * 1000).toFixed(1);
+
+  $("dns-instances").innerHTML = m.per_instance.map(i => { const ok = i.running; return `<div class="p-3 rounded bg-slate-800/30 border border-slate-800"><div class="flex items-center justify-between mb-1"><div class="flex items-center gap-1.5"><span class="dot ${ok?'dot-ok':'dot-bad'}"></span><span class="font-medium text-slate-100">${esc(i.name)}</span></div><span class="text-[10px] text-slate-500 font-mono">${i.url}</span></div><div class="grid grid-cols-3 gap-2 mt-1.5"><div><div class="text-[10px] text-slate-500">Dotazy</div><div class="font-mono text-sm text-cyan-300">${fmtNum(i.queries_24h)}</div></div><div><div class="text-[10px] text-slate-500">Blocked</div><div class="font-mono text-sm text-rose-300">${i.block_rate_pct}%</div></div><div><div class="text-[10px] text-slate-500">Avg time</div><div class="font-mono text-sm text-emerald-300">${(i.avg_processing_s*1000).toFixed(1)}ms</div></div></div></div>`; }).join("");
+
+  function rl(list, color) { return list.length ? list.slice(0, 20).map(x => `<div class="flex items-center justify-between py-0.5 hover:bg-slate-800/30 rounded px-1"><span class="text-[11px] truncate max-w-[280px]" title="${esc(x.name)}">${esc(x.name)}</span><span class="text-[10px] font-mono ${color}">${fmtNum(x.count)}</span></div>`).join("") : '<div class="text-slate-500 text-xs">žádná data</div>'; }
+  $("dns-top-blocked").innerHTML = rl(m.top_blocked, "text-rose-300");
+  $("dns-top-queried").innerHTML = rl(m.top_queried, "text-cyan-300");
+  // P1 #2: clients with hostnames + universal IP click
+  $("dns-top-clients").innerHTML = m.top_clients.length
+    ? m.top_clients.slice(0, 20).map(c => {
+        const hostname = c.hostname || null;
+        const ip = c.ip || c.name;
+        const display = hostname
+          ? `<span class="text-[11px] text-slate-200">${esc(hostname)}</span><span class="text-[9px] text-slate-500 font-mono ml-1" data-ip="${ip}">${ip}</span>`
+          : `<span class="text-[11px] font-mono" data-ip="${ip}">${ip}</span>`;
+        return `<div class="flex items-center justify-between py-0.5 hover:bg-slate-800/30 rounded px-1">${display}<span class="text-[10px] font-mono text-emerald-300 ml-auto">${fmtNum(c.count)}</span></div>`;
+      }).join("")
+    : '<div class="text-slate-500 text-xs">žádná data</div>';
+}
+
+// === D3 Topology (mini + full) ===
+let topoData = null, topoSim = null;
+let cachedWifi = null, cachedNetwork = null, cachedTalkers = null;
+
+function showTopoDetail(d) {
+  let html = `<div class="p-4 rounded-xl bg-slate-800/60 border border-cyan-500/30 max-w-2xl" style="box-shadow: 0 0 24px rgba(6,182,212,0.15);">
+    <div class="flex items-center gap-3 mb-2">
+      <span class="text-3xl">${d.icon}</span>
+      <div>
+        <div class="text-lg font-semibold text-slate-100">${esc(d.name)}</div>
+        <div class="text-[10px] text-slate-500 uppercase tracking-wider">${d.kind}${d.model ? ' · '+esc(d.model) : ''}</div>
+      </div>
+    </div>
+    <div class="grid grid-cols-2 gap-x-4 gap-y-1 text-xs mt-3">`;
+  if (d.ip) html += `<div class="text-slate-500">IP</div><div class="font-mono text-slate-200">${d.ip}</div>`;
+  if (d.mac) html += `<div class="text-slate-500">MAC</div><div class="font-mono text-slate-200 text-[11px]">${d.mac}</div>`;
+  if (d.version) html += `<div class="text-slate-500">Firmware</div><div class="font-mono text-slate-200">${d.version}</div>`;
+  if (d.state) html += `<div class="text-slate-500">Stav</div><div class="text-emerald-300">${d.state}</div>`;
+  if (d.cpu != null) html += `<div class="text-slate-500">CPU</div><div class="font-mono text-slate-200">${d.cpu}%</div>`;
+  if (d.detail) html += `<div class="text-slate-500">Info</div><div class="text-slate-300">${d.detail}</div>`;
+  html += `</div>`;
+
+  // Router → top talkers + active connections
+  if (d.kind === "router" && cachedTalkers && cachedTalkers.top_talkers) {
+    const ts = cachedTalkers.top_talkers.slice(0, 10);
+    html += `<div class="mt-4 pt-3 border-t border-slate-700">
+      <div class="section-label mb-2 text-cyan-300">📊 Top ${ts.length} talkers procházejících routerem</div>
+      <div class="space-y-1">
+        ${ts.map(t => {
+          let name = t.hostname || t.name || t.ip || "?";
+          if (/^[0-9a-fA-F:]{17}$/.test(name)) { const last4 = name.replace(/:/g,"").slice(-4); name = `${t.vendor || "?"} · ${last4}`; }
+          return `<div class="flex items-center justify-between gap-2 text-[11px] hover:bg-slate-700/40 rounded px-2 py-1">
+            <div class="truncate flex-1"><span class="text-slate-200">${esc(name)}</span> <span class="font-mono text-slate-500 ml-1">${t.ip}</span></div>
+            <div class="text-right"><span class="font-mono text-cyan-300">${fmtBytes(t.total_bytes||0)}</span></div>
+          </div>`;
+        }).join("")}
+      </div>
+    </div>`;
+  }
+
+  // AP → WiFi clients (signal, retries, radio)
+  if (d.kind === "ap" && cachedWifi && cachedWifi.aps) {
+    const ap = cachedWifi.aps.find(a => a.ap_mac === d.mac || a.ap_name === d.name);
+    if (ap && ap.clients && ap.clients.length) {
+      html += `<div class="mt-4 pt-3 border-t border-slate-700">
+        <div class="section-label mb-2 text-emerald-300">📶 ${ap.client_count} WiFi klientů · průměr ${ap.avg_signal || '?'} dBm</div>
+        <div class="space-y-1 max-h-72 overflow-y-auto scrollbar">
+          ${ap.clients.map(c => {
+            const sig = c.signal;
+            const sigCol = sig >= -55 ? 'text-emerald-300' : sig >= -65 ? 'text-cyan-300' : sig >= -75 ? 'text-amber-300' : 'text-rose-300';
+            const pct = sig == null ? 0 : Math.max(0, Math.min(100, Math.round((sig + 90) * 100 / 60)));
+            const barCol = sig >= -55 ? 'bg-emerald-500' : sig >= -65 ? 'bg-cyan-500' : sig >= -75 ? 'bg-amber-500' : 'bg-rose-500';
+            let name = c.hostname || c.mac || "?";
+            return `<div class="flex items-center gap-2 text-[11px] px-2 py-1 rounded hover:bg-slate-700/40">
+              <div class="min-w-0 flex-1 truncate" title="${esc(name)}"><span class="text-slate-100">${esc(name.slice(0,28))}</span> <span class="font-mono text-slate-500 ml-1">${c.ip || ''}</span></div>
+              <div class="text-[10px] text-slate-500 font-mono">${esc(c.radio || '')} ch${c.channel || '?'}</div>
+              <div class="flex items-center gap-1.5 w-24"><span class="font-mono ${sigCol} text-[10px]">${sig||'?'}dBm</span><div class="flex-1 h-1 bg-slate-800 rounded"><div class="h-full rounded ${barCol}" style="width:${pct}%"></div></div></div>
+              <div class="text-[10px] font-mono w-14 text-right ${c.tx_retries>1000?'text-amber-300':'text-slate-500'}" title="TX retries">${fmtNum(c.tx_retries||0)}</div>
+            </div>`;
+          }).join("")}
+        </div>
+      </div>`;
+    } else {
+      html += `<div class="mt-4 pt-3 border-t border-slate-700 text-[11px] text-slate-500">Žádní klienti připojeni</div>`;
+    }
+  }
+
+  // Switch → wired clients (port, IP, traffic)
+  if (d.kind === "switch" && cachedWifi && cachedWifi.switches) {
+    const sw = cachedWifi.switches.find(s => s.sw_mac === d.mac || s.sw_name === d.name);
+    if (sw && sw.clients && sw.clients.length) {
+      html += `<div class="mt-4 pt-3 border-t border-slate-700">
+        <div class="section-label mb-2 text-violet-300">🔌 ${sw.client_count} drátových klientů</div>
+        <div class="space-y-1 max-h-72 overflow-y-auto scrollbar">
+          ${sw.clients.map(c => `<div class="flex items-center gap-2 text-[11px] px-2 py-1 rounded hover:bg-slate-700/40">
+            <div class="font-mono text-violet-300 text-[10px] w-12">port ${c.port}</div>
+            <div class="min-w-0 flex-1 truncate" title="${esc(c.hostname || c.mac)}"><span class="text-slate-100">${esc((c.hostname || c.mac).slice(0,32))}</span> <span class="font-mono text-slate-500 ml-1">${c.ip || ''}</span></div>
+            <div class="text-[10px] text-slate-500 font-mono whitespace-nowrap">↓ ${fmtBytes(c.rx_bytes||0)} · ↑ ${fmtBytes(c.tx_bytes||0)}</div>
+          </div>`).join("")}
+        </div>
+      </div>`;
+    } else {
+      html += `<div class="mt-4 pt-3 border-t border-slate-700 text-[11px] text-slate-500">Žádní klienti připojeni</div>`;
+    }
+  }
+
+  // DNS node → AdGuard stats
+  if (d.kind === "dns" && d.detail) {
+    html += `<div class="mt-4 pt-3 border-t border-slate-700">
+      <div class="section-label mb-2 text-sky-300">🛡️ AdGuard Home</div>
+      <div class="text-[11px] text-slate-300">${d.detail}</div>
+      <button class="chip mt-2" onclick="document.querySelector('[data-target=tab-dns]').click()">Otevřít DNS tab →</button>
+    </div>`;
+  }
+
+  // Client bubble → list devices
+  if (d.kind === "clients" && cachedNetwork && cachedNetwork.devices) {
+    // d.id looks like "clients-wifi-<ap_id>" or "clients-wired-<sw_id>"
+    const m = d.id.match(/^clients-(wifi|wired)-(.+)$/);
+    if (m) {
+      const kind = m[1], uplinkId = m[2];
+      // Find uplink device's NAME via infra
+      const infraDev = (cachedNetwork.infra || []).find(x => x.id === uplinkId);
+      const uplinkName = infraDev ? infraDev.name : '';
+      const filteredDevs = (cachedNetwork.devices || []).filter(c =>
+        c.online && c.kind === 'client' && c.uplink === uplinkName &&
+        (kind === "wifi" ? c.client_type === "WIRELESS" : c.client_type === "WIRED")
+      );
+      if (filteredDevs.length) {
+        html += `<div class="mt-4 pt-3 border-t border-slate-700">
+          <div class="section-label mb-2">${kind === "wifi" ? "📶 WiFi" : "🔌 drát"} klienti · ${filteredDevs.length}</div>
+          <div class="space-y-0.5 max-h-64 overflow-y-auto scrollbar">
+          ${filteredDevs.map(c => {
+            let name = c.hostname || c.mac;
+            if (/^[0-9a-fA-F:]{17}$/.test(name)) { const last4 = c.mac.replace(/:/g,"").slice(-4); name = `${c.vendor || "?"} · ${last4}`; }
+            return `<div class="flex items-center gap-2 text-[11px] px-2 py-0.5 rounded hover:bg-slate-700/40">
+              <span class="dot dot-ok"></span>
+              <span class="flex-1 truncate text-slate-200">${esc(name)}</span>
+              <span class="font-mono text-slate-500">${c.ip || ''}</span>
+            </div>`;
+          }).join("")}
+          </div>
+        </div>`;
+      }
+    }
+  }
+
+  html += `</div>`;
+  $("topo-detail").innerHTML = html;
+}
+
+function renderTopologyD3() {
+  if (!topoData) return;
+  const svg = d3.select("#topology-svg");
+  svg.selectAll("*").remove();
+  const w = svg.node().clientWidth, h = svg.node().clientHeight;
+  const g = svg.append("g");
+  const zoom = d3.zoom().scaleExtent([0.3, 3]).on("zoom", e => g.attr("transform", e.transform));
+  svg.call(zoom);
+  if ($("topo-reset")) $("topo-reset").onclick = () => svg.transition().duration(400).call(zoom.transform, d3.zoomIdentity);
+
+  // Kulaté levitující bublinky + hierarchie (forceY na úroveň ve stromu) + drag.
+  const COL = { internet:"#38bdf8", router:"#34d399", dns:"#a78bfa", server:"#fbbf24", switch:"#22d3ee", ap:"#60a5fa", clients:"#64748b" };
+  svg.append("defs").append("marker").attr("id","topo-arrow").attr("viewBox","0 -5 10 10")
+    .attr("refX",17).attr("refY",0).attr("markerWidth",6).attr("markerHeight",6).attr("orient","auto")
+    .append("path").attr("d","M0,-4L8,0L0,4").attr("fill","#a78bfa");
+
+  const childOf = new Map(); topoData.links.forEach(l => childOf.set(l.target, l.source));
+  const depthOf = id => { let d=0,x=id; while(childOf.has(x)){ x=childOf.get(x); if(++d>20)break; } return d; };
+  const nodes = topoData.nodes.map(n => ({...n, _depth: depthOf(n.id)}));
+  const links = topoData.links.map(l => ({...l}));
+  const extra = (topoData.extra_links || []).map(l => ({...l}));
+  const nById = new Map(nodes.map(n => [n.id, n]));
+  const maxD = Math.max(1, ...nodes.map(n => n._depth));
+  const tier = Math.min(140, (h - 70) / maxD);
+
+  const sim = d3.forceSimulation(nodes)
+    .force("link", d3.forceLink(links).id(d => d.id).distance(d => d.target.kind === "clients" ? 72 : 132).strength(0.22))
+    .force("y", d3.forceY(d => 50 + d._depth * tier).strength(0.92))
+    .force("x", d3.forceX(w / 2).strength(0.02))
+    .force("charge", d3.forceManyBody().strength(-680))
+    .force("collide", d3.forceCollide().radius(d => d.kind === "clients" ? 34 : 60))
+    .alphaDecay(0.025);
+
+  const link = g.append("g").selectAll("line").data(links).join("line").attr("stroke", "#243049").attr("stroke-width", 2);
+  const xlink = g.append("g").selectAll("line").data(extra).join("line")
+    .attr("stroke", "#a78bfa").attr("stroke-width", 1.6).attr("stroke-dasharray", "5 4")
+    .attr("marker-end", "url(#topo-arrow)").attr("opacity", 0.85);
+
+  const node = g.append("g").selectAll("g").data(nodes).join("g").style("cursor", "pointer")
+    .call(d3.drag()
+      .on("start", (e, d) => { if (!e.active) sim.alphaTarget(0.25).restart(); d.fx = d.x; d.fy = d.y; })
+      .on("drag", (e, d) => { d.fx = e.x; d.fy = e.y; })
+      .on("end", (e, d) => { if (!e.active) sim.alphaTarget(0.015); d.fx = null; d.fy = null; }))
+    .on("click", (e, d) => showTopoDetail(d));
+
+  node.each(function (d) {
+    const sel = d3.select(this), col = COL[d.kind] || "#94a3b8";
+    const isClient = d.kind === "clients", r = isClient ? 17 : 30;
+    sel.append("circle").attr("r", r).attr("fill", "#0b1322").attr("stroke", col).attr("stroke-width", 2.2)
+      .attr("opacity", d.state === "unknown" ? 0.5 : 1).style("filter", `drop-shadow(0 0 6px ${col}66)`);
+    sel.append("text").text(d.icon || "").attr("text-anchor", "middle").attr("dy", isClient ? 5 : 7).style("font-size", isClient ? "13px" : "22px");
+    sel.append("text").text((d.name || "").slice(0, 22)).attr("text-anchor", "middle").attr("y", r + 13).attr("fill", "#e2e8f0").style("font-size", "11px").style("font-weight", 600);
+    if (!isClient) { const badges = (d.badges || []).join(" · ");
+      if (badges) sel.append("text").text(badges).attr("text-anchor", "middle").attr("y", r + 26).attr("fill", col).style("font-size", "8.5px").style("font-weight", 600); }
+  });
+
+  sim.on("tick", () => {
+    link.attr("x1", d => d.source.x).attr("y1", d => d.source.y).attr("x2", d => d.target.x).attr("y2", d => d.target.y);
+    xlink.attr("x1", d => (nById.get(d.source)||{}).x).attr("y1", d => (nById.get(d.source)||{}).y)
+         .attr("x2", d => (nById.get(d.target)||{}).x).attr("y2", d => (nById.get(d.target)||{}).y);
+    node.attr("transform", d => `translate(${d.x},${d.y})`);
+  });
+  sim.alphaTarget(0.015).restart();   // jemný perpetuální pohyb = „levitace"
+}
+
+// Mini topology — render ONCE, no flicker
+let miniTopoBuilt = false;
+function buildMiniTopology(net) {
+  if (!topoData || miniTopoBuilt) return;
+  miniTopoBuilt = true;
+  const svg = d3.select("#mini-topo-svg");
+  svg.selectAll("*").remove();
+  const w = svg.node().clientWidth || 900, h = svg.node().clientHeight || 300;
+  const g = svg.append("g");
+  // Mouse zoom + pan like the globe (helps on narrow windows); dblclick = reset. Detail→ button navigates.
+  const zoom = d3.zoom().scaleExtent([0.5, 5]).on("zoom", (ev) => g.attr("transform", ev.transform));
+  svg.call(zoom).style("cursor", "grab")
+     .on("mousedown.cur", () => svg.style("cursor", "grabbing"))
+     .on("mouseup.cur", () => svg.style("cursor", "grab"));
+  svg.on("dblclick.zoom", () => svg.transition().duration(300).call(zoom.transform, d3.zoomIdentity));
+
+  // Tidy tree (d3.tree) — hierarchie ZLEVA DOPRAVA, žádné křížení hran, klienti čistě pod rodičem.
+  const COL = { internet:"#38bdf8", router:"#34d399", dns:"#a78bfa", server:"#fbbf24", switch:"#22d3ee", ap:"#60a5fa", clients:"#64748b" };
+  svg.append("defs").append("marker").attr("id","mini-arrow").attr("viewBox","0 -5 10 10")
+    .attr("refX",11).attr("refY",0).attr("markerWidth",5).attr("markerHeight",5).attr("orient","auto")
+    .append("path").attr("d","M0,-3L6,0L0,3").attr("fill","#a78bfa");
+
+  const parentOf = new Map(); topoData.links.forEach(l => parentOf.set(l.target, l.source));
+  let rootH;
+  try { rootH = d3.stratify().id(d => d.id).parentId(d => parentOf.get(d.id) || null)(topoData.nodes); }
+  catch (e) { console.warn("mini-topo stratify failed:", e); miniTopoBuilt = false; return; }
+  const mL = 46, mR = 88, mT = 24, mB = 26;
+  d3.tree().size([h - mT - mB, w - mL - mR]).separation((a, b) => a.parent === b.parent ? 1 : 1.35)(rootH);
+  const px = d => mL + d.y, py = d => mT + d.x;   // d.y = depth→horizontal, d.x = breadth→vertical
+  const byId = new Map(rootH.descendants().map(d => [d.id, d]));
+
+  g.append("g").selectAll("path").data(rootH.links()).join("path")
+    .attr("fill","none").attr("stroke","#243049").attr("stroke-width",1.4)
+    .attr("d", d => { const x1=px(d.source),y1=py(d.source),x2=px(d.target),y2=py(d.target),mx=(x1+x2)/2;
+      return `M${x1},${y1}C${mx},${y1} ${mx},${y2} ${x2},${y2}`; });
+  g.append("g").selectAll("line").data((topoData.extra_links||[]).filter(l => byId.has(l.source) && byId.has(l.target))).join("line")
+    .attr("stroke","#a78bfa").attr("stroke-width",1.2).attr("stroke-dasharray","4 3").attr("marker-end","url(#mini-arrow)").attr("opacity",0.8)
+    .attr("x1",l=>px(byId.get(l.source))).attr("y1",l=>py(byId.get(l.source))).attr("x2",l=>px(byId.get(l.target))).attr("y2",l=>py(byId.get(l.target)));
+
+  const node = g.append("g").selectAll("g").data(rootH.descendants()).join("g").attr("transform", d => `translate(${px(d)},${py(d)})`);
+  node.append("circle").attr("r", d => d.data.kind === "clients" ? 9 : 13)
+    .attr("fill","#0b1322").attr("stroke", d => COL[d.data.kind] || "#94a3b8").attr("stroke-width",1.8)
+    .attr("opacity", d => d.data.state === "unknown" ? 0.5 : 1).style("filter", d => `drop-shadow(0 0 4px ${(COL[d.data.kind]||'#94a3b8')}55)`);
+  node.append("text").text(d => d.data.icon || "").attr("text-anchor","middle").attr("dy", d => d.data.kind === "clients" ? 3 : 4).style("font-size", d => d.data.kind === "clients" ? "9px" : "12px");
+  node.append("text").text(d => (d.data.name || "").slice(0, 12)).attr("text-anchor","middle").attr("y", d => (d.data.kind === "clients" ? 9 : 13) + 10).attr("fill","#94a3b8").style("font-size","7.5px");
+}
+
+// === Globe of attackers (D3 orthographic) ===
+let worldTopology = null;
+async function loadWorld() {
+  if (worldTopology) return worldTopology;
+  try {
+    const url = "https://cdn.jsdelivr.net/npm/world-atlas@2.0.2/countries-110m.json";
+    worldTopology = await d3.json(url);
+  } catch (e) { console.warn("world topo load failed:", e); }
+  return worldTopology;
+}
+
+let globeRotation = [-15, -20], globeAnimating = false;
+let globeScale = 1.0;
+let globeInteracting = false;
+let globeInteractTimeout = null;
+let globeListenersSet = false;
+
+function setGlobeInteracting() {
+  globeInteracting = true;
+  clearTimeout(globeInteractTimeout);
+  globeInteractTimeout = setTimeout(() => { globeInteracting = false; }, 3000);
+}
+
+function setupGlobeInteractions() {
+  if (globeListenersSet) return;
+  globeListenersSet = true;
+  const svgSel = d3.select("#globe-svg");
+  const svgEl = svgSel.node();
+
+  // Drag = rotate (left mouse button)
+  let dragStart = null;
+  svgSel.call(
+    d3.drag()
+      .on("start", (event) => {
+        dragStart = { x: event.x, y: event.y, rotation: [...globeRotation] };
+        svgEl.classList.add("dragging");
+        setGlobeInteracting();
+      })
+      .on("drag", (event) => {
+        if (!dragStart) return;
+        const sens = 0.5 / globeScale;
+        globeRotation[0] = dragStart.rotation[0] + (event.x - dragStart.x) * sens;
+        globeRotation[1] = Math.max(-85, Math.min(85, dragStart.rotation[1] - (event.y - dragStart.y) * sens));
+        setGlobeInteracting();
+        renderGlobe(globePoints);
+      })
+      .on("end", () => {
+        dragStart = null;
+        svgEl.classList.remove("dragging");
+      })
+  );
+
+  // Wheel = zoom
+  svgEl.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    const delta = -e.deltaY * 0.0015;
+    globeScale = Math.max(0.5, Math.min(3.5, globeScale + delta * globeScale));
+    setGlobeInteracting();
+    renderGlobe(globePoints);
+  }, { passive: false });
+
+  // Reset
+  document.getElementById("globe-reset").addEventListener("click", (e) => {
+    e.stopPropagation();
+    globeRotation = [-15, -20];
+    globeScale = 1.0;
+    renderGlobe(globePoints);
+  });
+}
+
+async function renderGlobe(points) {
+  const world = await loadWorld();
+  const svg = d3.select("#globe-svg");
+  svg.selectAll("*").remove();
+  const w = svg.node().clientWidth || 400, h = 320;
+  const radius = (Math.min(w, h) / 2 - 14) * globeScale;
+  const proj = d3.geoOrthographic().scale(radius).translate([w/2, h/2]).rotate(globeRotation).clipAngle(90);
+  const path = d3.geoPath(proj);
+
+  // The visible center of the globe ("front" — opposite of rotation)
+  const visibleCenter = [-globeRotation[0], -globeRotation[1]];
+  const isOnFront = (lon, lat) => d3.geoDistance(visibleCenter, [lon, lat]) < Math.PI / 2 - 0.02;
+
+  // Defs: ocean gradient + vignette (terminator shadow)
+  const defs = svg.append("defs");
+  const grad = defs.append("radialGradient").attr("id", "oceanGradient").attr("cx", "30%").attr("cy", "30%");
+  grad.append("stop").attr("offset", "0%").attr("stop-color", "#0ea5b6");
+  grad.append("stop").attr("offset", "55%").attr("stop-color", "#0c4a6e");
+  grad.append("stop").attr("offset", "95%").attr("stop-color", "#0b2540");
+  grad.append("stop").attr("offset", "100%").attr("stop-color", "#020617");
+
+  const vignette = defs.append("radialGradient").attr("id", "vignette").attr("cx", "50%").attr("cy", "50%").attr("r", "50%");
+  vignette.append("stop").attr("offset", "55%").attr("stop-color", "rgba(0,0,0,0)");
+  vignette.append("stop").attr("offset", "85%").attr("stop-color", "rgba(2,6,23,0.45)");
+  vignette.append("stop").attr("offset", "100%").attr("stop-color", "rgba(2,6,23,0.95)");
+
+  // atmosphere glow rings
+  svg.append("circle").attr("cx", w/2).attr("cy", h/2).attr("r", radius + 6).attr("class", "globe-atmosphere");
+  svg.append("circle").attr("cx", w/2).attr("cy", h/2).attr("r", radius + 12).attr("fill", "none").attr("stroke", "rgba(56,189,248,0.12)").attr("stroke-width", "2");
+
+  // sphere with ocean gradient
+  svg.append("path").datum({type: "Sphere"}).attr("d", path).attr("class", "globe-sphere");
+  svg.append("path").datum(d3.geoGraticule()()).attr("d", path).attr("class", "globe-graticule");
+
+  if (world) {
+    const land = topojson.feature(world, world.objects.countries);
+    svg.append("path").datum(land).attr("d", path).attr("class", "globe-land");
+  }
+
+  // Vignette on top of land for terminator-shadow effect (darkens the limb)
+  svg.append("circle").attr("cx", w/2).attr("cy", h/2).attr("r", radius).attr("fill", "url(#vignette)").style("pointer-events", "none");
+
+  // home (Prague) — only when on the visible side
+  const home = [14.42, 50.08];
+  if (isOnFront(home[0], home[1])) {
+    const homeProj = proj(home);
+    if (homeProj) {
+      svg.append("circle").attr("cx", homeProj[0]).attr("cy", homeProj[1]).attr("r", 10).attr("fill", "rgb(52,211,153)").attr("opacity", 0.25);
+      svg.append("circle").attr("cx", homeProj[0]).attr("cy", homeProj[1]).attr("r", 4).attr("class", "globe-home");
+    }
+  }
+
+  if (points && points.length) {
+    const maxHits = Math.max(1, d3.max(points, d => d.hits));
+    points.forEach(p => {
+      // Skip attackers on the back side completely (arc + dot)
+      if (!isOnFront(p.lon, p.lat)) return;
+      const c = proj([p.lon, p.lat]);
+      if (!c) return;
+      const radiusVal = 1.5 + Math.sqrt(p.hits / maxHits) * 7;
+
+      // Arc — sample densely, keep only front-side points, split into visible segments
+      const interpolate = d3.geoInterpolate(home, [p.lon, p.lat]);
+      const segments = [];
+      let currentSeg = [];
+      for (let t = 0; t <= 1.001; t += 0.025) {
+        const pt = interpolate(t);
+        if (isOnFront(pt[0], pt[1])) {
+          currentSeg.push(pt);
+        } else if (currentSeg.length > 1) {
+          segments.push(currentSeg);
+          currentSeg = [];
+        }
+      }
+      if (currentSeg.length > 1) segments.push(currentSeg);
+      segments.forEach(seg => {
+        svg.append("path").datum({type: "LineString", coordinates: seg}).attr("d", path).attr("class", "globe-line");
+      });
+
+      // Fade near the limb so points smoothly disappear when rotating to back
+      const distance = d3.geoDistance(visibleCenter, [p.lon, p.lat]);
+      const limbFade = Math.max(0.25, 1 - Math.pow(distance / (Math.PI / 2), 4));
+
+      const g = svg.append("g").style("cursor", "pointer").style("opacity", limbFade).on("click", () => showIntel(p.ip));
+      g.append("circle").attr("cx", c[0]).attr("cy", c[1]).attr("r", radiusVal + 5).attr("class", "globe-attacker-glow");
+      g.append("circle").attr("cx", c[0]).attr("cy", c[1]).attr("r", radiusVal).attr("class", "globe-attacker").append("title").text(`${p.ip} · ${p.city||''} ${p.country||''} · ${p.hits} útoků`);
+    });
+  }
+
+  $("globe-count").textContent = `${points.length} útočníků`;
+}
+
+let globePoints = [];
+function startGlobeRotation() {
+  if (globeAnimating) return;
+  globeAnimating = true;
+  d3.timer(elapsed => {
+    // Auto-rotate pauses while user interacts; resumes after 3s of idle
+    if (!globeInteracting) {
+      globeRotation[0] = (globeRotation[0] + 0.25) % 360;
+    }
+    if (document.querySelector("#tab-overview.active")) renderGlobe(globePoints);
+  }, 60);
+}
+
+// === WAN / LAN / VPN render with time-range filter ===
+let currentPeriod = "24h";
+const PERIOD_LABELS = { "1h": "1h", "6h": "6h", "24h": "24h", "7d": "7 dní", "30d": "30 dní", "boot": "od bootu" };
+const PERIOD_SUBS = {
+  "1h": "za poslední hodinu", "6h": "za 6 hodin", "24h": "za 24 hodin",
+  "7d": "za 7 dní", "30d": "za 30 dní", "boot": "od restartu routeru"
+};
+const TRAFFIC_HOURS = { "1h": 1, "6h": 6, "24h": 24, "7d": 168, "30d": 720, "boot": 87600 };
+let chartTrafficHist = null;
+let trafficFilter = "wan", lastTrafficSummary = null, lastTrafficHistory = null;
+
+function makeHistChart(canvasId, color) {
+  return new Chart($(canvasId), {
+    type: "bar",
+    data: { labels: [], datasets: [
+      { label: "↓ RX", data: [], backgroundColor: "rgba(16,185,129,0.75)", borderRadius: 2, stack: "t" },
+      { label: "↑ TX", data: [], backgroundColor: color, borderRadius: 2, stack: "t" },
+    ]},
+    options: { responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false },
+        tooltip: { callbacks: { label: c => `${c.dataset.label}: ${fmtBytes(c.parsed.y)}` }}},
+      scales: { x: { stacked: true, ticks: { font: { size: 8 }, maxRotation: 0, autoSkip: true, maxTicksLimit: 8 }, grid: { display: false }},
+                y: { stacked: true, display: false }}
+    }
+  });
+}
+
+function setPeriodLabels() {
+  const e = $("tr-period-sub"); if (e) e.textContent = PERIOD_SUBS[currentPeriod];
+}
+
+function renderWanLan(d) {
+  lastTrafficSummary = d;
+  const v = d[trafficFilter] || {};
+  if ($("tr-total")) $("tr-total").textContent = fmtBytes((v.rx_bytes || 0) + (v.tx_bytes || 0));
+  if ($("tr-rx")) $("tr-rx").textContent = fmtBytes(v.rx_bytes || 0);
+  if ($("tr-tx")) $("tr-tx").textContent = fmtBytes(v.tx_bytes || 0);
+  if ($("tr-ifaces")) $("tr-ifaces").textContent = (v.interfaces || []).join(" · ") || "—";
+  setPeriodLabels();
+}
+
+function fmtBucketLabel(ts, period) {
+  const d = new Date(ts * 1000);
+  if (period === "1h" || period === "6h") return d.toLocaleTimeString("cs-CZ", { hour: "2-digit", minute: "2-digit" });
+  if (period === "24h") return d.toLocaleTimeString("cs-CZ", { hour: "2-digit", minute: "2-digit" });
+  return d.toLocaleDateString("cs-CZ", { day: "2-digit", month: "2-digit" }) + (period === "7d" ? " " + d.toLocaleTimeString("cs-CZ",{hour:"2-digit"}) + "h" : "");
+}
+
+function renderWanLanHistory(h) {
+  lastTrafficHistory = h;
+  if (!chartTrafficHist) chartTrafficHist = makeHistChart("chart-traffic-history", "rgba(6,182,212,0.7)");
+  const period = h.period || currentPeriod;
+  const data = h[trafficFilter] || [];
+  chartTrafficHist.data.labels = data.map(b => fmtBucketLabel(b.ts, period));
+  chartTrafficHist.data.datasets[0].data = data.map(b => b.rx);
+  chartTrafficHist.data.datasets[1].data = data.map(b => b.tx);
+  chartTrafficHist.update("none");
+}
+
+// Period selector — fire instant re-fetch on change
+document.querySelectorAll(".period-chip").forEach(btn => {
+  btn.addEventListener("click", async () => {
+    document.querySelectorAll(".period-chip").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    currentPeriod = btn.dataset.period;
+    $("period-info").textContent = currentPeriod === "boot"
+      ? "live MikroTik counters · cumulative od restartu routeru"
+      : "snapshoty každých 5 min · delta-summed za " + PERIOD_LABELS[currentPeriod];
+    await refreshTraffic();
+  });
+});
+
+async function refreshTraffic() {
+  try {
+    const lbl = $("dev-inet-period"); if (lbl) lbl.textContent = PERIOD_LABELS[currentPeriod];
+    const [summary, history] = await Promise.all([
+      fetch(`/api/wan-lan-summary?period=${currentPeriod}`).then(r => r.json()),
+      currentPeriod === "boot" ? Promise.resolve({}) : fetch(`/api/wan-lan-history?period=${currentPeriod}`).then(r => r.json()),
+    ]);
+    renderWanLan(summary);
+    if (currentPeriod !== "boot") renderWanLanHistory(history);
+    fetch(`/api/device-inet?hours=${TRAFFIC_HOURS[currentPeriod] || 24}`).then(r => r.json()).then(renderDeviceInet).catch(() => {});
+  } catch (e) { console.error("traffic refresh failed:", e); }
+}
+
+// WAN/VPN filtr — překreslí z cache, bez refetche
+document.querySelectorAll(".chip[data-traffic]").forEach(btn => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".chip[data-traffic]").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    trafficFilter = btn.dataset.traffic;
+    if (lastTrafficSummary) renderWanLan(lastTrafficSummary);
+    if (lastTrafficHistory) renderWanLanHistory(lastTrafficHistory);
+  });
+});
+
+// === Internet usage (WAN + VPN) — trustworthy, router-sourced ===
+// === Outcome / dopad (ADR 0005): detekce → firewall verdikt → vystavený povrch ===
+function renderOutcome(d) {
+  const set = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
+  const det = d.ids_attackers || 0, drp = d.attackers_dropped || 0, pct = d.dropped_pct || 0;
+  const plbl = (typeof securityPeriod !== "undefined" && PERIOD_LABELS[securityPeriod]) || "24h";
+  set("outcome-detected", fmtNum(det));
+  set("outcome-detected-sub", `unikátních IP za ${plbl}`);
+  set("outcome-blocked", fmtNum(drp));
+  set("outcome-blocked-sub", `${pct}% potvrzeno v logu · ${fmtNum(d.fw_drops || 0)} dropů`);
+  set("outcome-reached", fmtNum(d.reached || 0));
+  const exp = d.exposed || {}, pf = exp.port_forwards || [];
+  set("outcome-reached-sub", pf.length ? `${pf.length} port-forward ven` : "žádný port-forward ven");
+  set("outcome-exposure", `vystaveno ven: ${pf.length ? pf.map(p => (p.protocol||'') + '/' + (p.dst_port||'?')).join(", ") : "0 služeb"}${exp.vpn ? " · 🔐 VPN" : ""}`);
+  const bp = d.top_blocked_ports || [], el = document.getElementById("outcome-ports");
+  if (el) el.innerHTML = bp.length
+    ? "🛑 nejvíc blokované porty: " + bp.map(p => `<span class="pill" style="background:rgba(244,63,94,0.12);color:#fb7185">:${p.port} <span class="text-slate-500">${p.count}</span></span>`).join(" ")
+    : "";
+}
+
+// === REÁLNÝ per-device internet (NetFlow kolektor, ADR 0007) ===
+function renderDeviceInet(d) {
+  const devs = d.devices || [], c = d.collector || {};
+  const set = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
+  set("dev-inet-meta", `${devs.length} zařízení · ↓ ${fmtBytes(d.total_down || 0)} / ↑ ${fmtBytes(d.total_up || 0)} · NetFlow ${fmtNum(c.packets || 0)} pkt`);
+  const el = document.getElementById("dev-inet-list");
+  if (!el) return;
+  if (!devs.length) {
+    el.innerHTML = '<div class="text-slate-500 text-xs py-4 text-center">sbírám NetFlow (první data ~1 min po startu)…</div>';
+    return;
+  }
+  el.innerHTML = devs.map((dv, i) => {
+    const name = dv.name || dv.ip;
+    const upPct = dv.total_bytes ? Math.round(dv.up_bytes * 100 / dv.total_bytes) : 50;
+    return `<div class="p-2 rounded-lg bg-slate-800/30 hover:bg-slate-800/50 transition">
+      <div class="flex items-center justify-between gap-2 mb-1">
+        <div class="flex items-center gap-2 min-w-0 flex-1">
+          <span class="text-[10px] font-mono text-slate-600 w-5 text-right">${i + 1}</span>
+          <div class="min-w-0">
+            <div class="text-xs font-medium text-slate-100 truncate">${esc(name)}</div>
+            <div class="text-[9px] text-slate-500 font-mono">${dv.ip}${dv.vendor ? ' · ' + esc(dv.vendor) : ''}</div>
+          </div>
+        </div>
+        <div class="text-right">
+          <div class="text-xs font-mono text-cyan-300">${fmtBytes(dv.total_bytes)}</div>
+          <div class="text-[9px] text-slate-500">↓ ${fmtBytes(dv.down_bytes)} · ↑ ${fmtBytes(dv.up_bytes)}</div>
+        </div>
+      </div>
+      <div class="traffic-bar flex">
+        <div class="bg-emerald-500" style="width:${100 - upPct}%"></div>
+        <div class="bg-cyan-500" style="width:${upPct}%"></div>
+      </div>
+    </div>`;
+  }).join("");
+}
+
+function renderInternetUsage(d) {
+  const wan = d.wan || {}, vpn = d.vpn || {};
+  const mtd = wan.mtd || {}, last = wan.last || {}, vmtd = vpn.mtd || {};
+  const set = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
+  const mLabel = (d.this_month || "").replace("-", "/");
+  set("inet-month", mLabel ? `měsíc ${mLabel} · ${d.day_of_month || "?"}. den` : "tento měsíc");
+  set("inet-mtd-down", fmtBytes(mtd.rx_bytes || 0));
+  set("inet-mtd-up",   fmtBytes(mtd.tx_bytes || 0));
+  set("inet-last", `↓ ${fmtBytes(last.rx_bytes || 0)} · ↑ ${fmtBytes(last.tx_bytes || 0)}`);
+  set("inet-vpn",  `↓ ${fmtBytes(vmtd.rx_bytes || 0)} · ↑ ${fmtBytes(vmtd.tx_bytes || 0)}`);
+  // Ø/den + odhad na měsíc — z autoritativního WAN counteru (ne z karty Provoz).
+  const totalMtd = (mtd.rx_bytes || 0) + (mtd.tx_bytes || 0);
+  const dom = d.day_of_month || 1, dim = d.days_in_month || 30;
+  const avg = totalMtd / Math.max(1, dom);
+  set("inet-avg", fmtBytes(avg));
+  set("inet-proj", "~" + fmtBytes(avg * dim));
+  // Per-day WAN sparkline for the current month
+  const daily = d.wan_daily || [];
+  if (!chartInetDaily) chartInetDaily = makeHistChart("chart-inet-daily", "rgba(6,182,212,0.7)");
+  chartInetDaily.data.labels = daily.map(b => new Date(b.ts * 1000).toLocaleDateString("cs-CZ", { day: "2-digit", month: "2-digit" }));
+  chartInetDaily.data.datasets[0].data = daily.map(b => b.rx);
+  chartInetDaily.data.datasets[1].data = daily.map(b => b.tx);
+  chartInetDaily.update("none");
+}
+
+// === Render everything ===
+async function refresh() {
+  // P0 fix: pause polling when tab is hidden — saves ~14 req / 5s of backend load
+  if (document.hidden) return;
+  try {
+    const [o, n, w, f, hs, dns, topo, now, tr, geo, internet, fwr] = await Promise.all([
+      fetch("/api/overview").then(r => r.json()),
+      fetch("/api/network").then(r => r.json()),
+      fetch("/api/wifi").then(r => r.json()),
+      fetch("/api/firewall").then(r => r.json()),
+      fetch("/api/health-status").then(r => r.json()),
+      fetch("/api/dns").then(r => r.json()),
+      fetch("/api/topology").then(r => r.json()),
+      fetch("/api/now-activity").then(r => r.json()),
+      fetch("/api/trends").then(r => r.json()),
+      fetch("/api/attacker-geo").then(r => r.json()),
+      fetch("/api/internet-usage").then(r => r.json()),
+      fetch("/api/firewall-rules").then(r => r.json()),
+    ]);
+    refreshTraffic();    // separate cadence — Overview period selector
+    refreshSecurity();   // separate cadence — Security period selector (outcome + donuts + alerts + wall-of-shame)
+    refreshDnsHistory(); // separate cadence — DNS period selector
+    renderHealth(hs);
+    renderOverview(o);
+    topoData = topo;
+    if (!topologyRendered && document.getElementById("tab-topology").classList.contains("active")) { topologyRendered = true; renderTopologyD3(); }
+    cachedNetwork = n; cachedWifi = w;
+    renderNetwork(n);
+    renderWiFi(w);
+    renderFirewall(f);
+    renderDNS(dns);
+    renderTrendsAndNow(now, tr);
+    renderInternetUsage(internet);
+    renderFirewallRules(fwr);
+    globePoints = geo.points || [];
+    renderGlobe(globePoints);
+    setupGlobeInteractions();
+    // Topology rendered only on initial click into the tab (heavy D3 sim);
+    // don't re-render on the 5 s data refresh — keep stable layout.
+  } catch (e) { console.error("refresh failed:", e); }
+}
+
+// Render topology lazily — first time the user opens the tab
+let topologyRendered = false;
+document.querySelector("[data-target=tab-topology]").addEventListener("click", () => {
+  if (!topologyRendered && topoData) {
+    topologyRendered = true;
+    renderTopologyD3();
+  }
+});
+
+// ================= SECURITY tab — own period selector =================
+let securityPeriod = "24h";
+const SEC_HOURS = { "1h": 1, "6h": 6, "24h": 24, "7d": 168, "30d": 720 };
+async function refreshSecurity() {
+  if (document.hidden) return;
+  const h = SEC_HOURS[securityPeriod] || 24;
+  try {
+    const [sec, outcome, wos, al] = await Promise.all([
+      fetch(`/api/security-summary?hours=${h}`).then(r => r.json()),
+      fetch(`/api/outcome?hours=${h}`).then(r => r.json()),
+      fetch(`/api/wall-of-shame?hours=${h}`).then(r => r.json()),
+      fetch(`/api/recent-alerts?hours=${h}&n=50`).then(r => r.json()),
+    ]);
+    renderSecurityAlerts({ alerts: sec });
+    renderOutcome(outcome);
+    renderWallOfShame(wos);
+    renderAlerts(al.alerts);
+    const lbl = PERIOD_LABELS[securityPeriod] || securityPeriod;
+    document.querySelectorAll(".sec-period-label").forEach(e => e.textContent = lbl);
+  } catch (e) { console.error("security refresh failed:", e); }
+}
+document.querySelectorAll(".sec-period-chip").forEach(btn => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".sec-period-chip").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    securityPeriod = btn.dataset.period;
+    refreshSecurity();
+  });
+});
+// "skeny + pokusy o zneužití" pill → jump to + flash the Wall of Shame list
+function focusActionable() {
+  document.querySelector("[data-target=tab-security]").click();
+  const grid = $("wos-grid"), card = grid ? grid.closest(".card") : null;
+  if (card) { card.scrollIntoView({ behavior: "smooth", block: "center" }); card.classList.add("ring-flash"); setTimeout(() => card.classList.remove("ring-flash"), 1500); }
+}
+
+// ================= DNS tab — own period selector (ADR 0008 history) =================
+let dnsPeriod = "24h";
+let chartDnsHist = null;
+function makeDnsHistChart() {
+  return new Chart($("chart-dns-history"), {
+    type: "bar",
+    data: { labels: [], datasets: [
+      { label: "dotazy", data: [], backgroundColor: "rgba(34,211,238,0.55)", borderRadius: 2 },
+      { label: "blokováno", data: [], backgroundColor: "rgba(244,63,94,0.8)", borderRadius: 2 },
+    ]},
+    options: { responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => `${c.dataset.label}: ${fmtNum(c.parsed.y)}` } } },
+      scales: { x: { ticks: { font: { size: 8 }, maxRotation: 0, autoSkip: true, maxTicksLimit: 12 }, grid: { display: false } },
+                y: { display: false } } }
+  });
+}
+async function refreshDnsHistory() {
+  if (document.hidden) return;
+  try {
+    const d = await fetch(`/api/dns-history?period=${dnsPeriod}`).then(r => r.json());
+    const s = d.summary || {};
+    const set = (id, v) => { const e = $(id); if (e) e.textContent = v; };
+    set("dns-kpi-q", fmtNum(s.queries || 0));
+    set("dns-kpi-blocked", fmtNum(s.blocked || 0));
+    set("dns-kpi-rate", (s.block_rate_pct || 0));
+    const note = $("dns-hist-note");
+    if (note) {
+      const windowStart = (Date.now() / 1000) - d.hours * 3600;
+      if (s.since && s.since > windowStart + 3600) {
+        const dt = new Date(s.since * 1000);
+        note.textContent = `historie zatím od ${dt.toLocaleString("cs-CZ", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })} · sbíráme dopředu`;
+      } else {
+        note.textContent = "vlastní hodinová historie · z AdGuard counterů";
+      }
+    }
+    const b = d.buckets || [];
+    if (!chartDnsHist) chartDnsHist = makeDnsHistChart();
+    chartDnsHist.data.labels = b.map(x => fmtBucketLabel(x.ts, d.hours <= 48 ? "24h" : "30d"));
+    chartDnsHist.data.datasets[0].data = b.map(x => x.queries);
+    chartDnsHist.data.datasets[1].data = b.map(x => x.blocked);
+    chartDnsHist.update("none");
+    const lbl = PERIOD_LABELS[dnsPeriod] || dnsPeriod;
+    document.querySelectorAll(".dns-period-label").forEach(e => e.textContent = lbl);
+  } catch (e) { console.error("dns history failed:", e); }
+}
+document.querySelectorAll(".dns-period-chip").forEach(btn => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".dns-period-chip").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    dnsPeriod = btn.dataset.period;
+    refreshDnsHistory();
+  });
+});
+
+// ================= "Co se právě teď děje" — fullscreen live feed =================
+let lastFeed = [];
+let chartInetDaily = null;
+function renderFeedFullscreen() {
+  const el = $("feed-fs-list");
+  if (!el) return;
+  const linkifyIp = s => esc(s).replace(/(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/g, '<span class="ip-link" data-ip="$1">$1</span>');
+  const m = $("feed-fs-meta"); if (m) m.textContent = `${lastFeed.length} událostí · živě`;
+  el.innerHTML = lastFeed.length
+    ? lastFeed.map(e => `<div class="feed-item flex items-start gap-2 p-2.5 rounded hover:bg-slate-800/40">
+        <div class="text-xl">${e.icon}</div>
+        <div class="flex-1 min-w-0">
+          <div class="flex items-baseline gap-2"><div class="text-sm font-medium text-slate-100">${linkifyIp(e.title)}</div><div class="text-[11px] text-slate-500 whitespace-nowrap">${esc(e.ago)}</div></div>
+          <div class="text-xs text-slate-400 mt-0.5">${linkifyIp(e.text)}</div>
+        </div></div>`).join("")
+    : '<div class="text-slate-500 text-sm py-8 text-center">Klid · nic se neděje</div>';
+}
+function setupFeedFullscreen() {
+  const modal = $("feed-fullscreen-modal");
+  if (!modal) return;
+  const close = () => modal.classList.remove("show");
+  $("feed-expand").addEventListener("click", () => { modal.classList.add("show"); renderFeedFullscreen(); });
+  $("feed-fs-close").addEventListener("click", close);
+  document.addEventListener("keydown", e => { if (e.key === "Escape" && modal.classList.contains("show")) close(); });
+}
+setupFeedFullscreen();
+
+// Restore last-viewed tab across refresh (default: Přehled)
+try {
+  const savedTab = localStorage.getItem("nw_tab");
+  if (savedTab && savedTab !== "tab-overview") {
+    const el = document.querySelector(`.tab[data-target="${savedTab}"]`);
+    if (el) el.click();
+  }
+} catch (e) {}
+
+refresh();
+setInterval(refresh, 5000);
+startGlobeRotation();
+
+// P0 fix: re-fetch immediately when tab regains focus (avoid stale data after pause)
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) refresh();
+});
+
+// =================== FULLSCREEN GLOBE ====================
+let fsGlobeAnimating = false;
+async function renderFullscreenGlobe() {
+  const world = await loadWorld();
+  const svg = d3.select("#globe-fullscreen-svg");
+  svg.selectAll("*").remove();
+  const w = window.innerWidth, h = window.innerHeight;
+  const radius = (Math.min(w, h) / 2 - 60) * globeScale;
+  const proj = d3.geoOrthographic().scale(radius).translate([w/2, h/2]).rotate(globeRotation).clipAngle(90);
+  const path = d3.geoPath(proj);
+  const visibleCenter = [-globeRotation[0], -globeRotation[1]];
+  const isOnFront = (lon, lat) => d3.geoDistance(visibleCenter, [lon, lat]) < Math.PI / 2 - 0.02;
+
+  const defs = svg.append("defs");
+  const grad = defs.append("radialGradient").attr("id", "fsOceanGradient").attr("cx", "30%").attr("cy", "30%");
+  grad.append("stop").attr("offset", "0%").attr("stop-color", "#0ea5b6");
+  grad.append("stop").attr("offset", "55%").attr("stop-color", "#0c4a6e");
+  grad.append("stop").attr("offset", "95%").attr("stop-color", "#0b2540");
+  grad.append("stop").attr("offset", "100%").attr("stop-color", "#020617");
+  const vig = defs.append("radialGradient").attr("id", "fsVignette").attr("cx", "50%").attr("cy", "50%").attr("r", "50%");
+  vig.append("stop").attr("offset", "55%").attr("stop-color", "rgba(0,0,0,0)");
+  vig.append("stop").attr("offset", "85%").attr("stop-color", "rgba(2,6,23,0.45)");
+  vig.append("stop").attr("offset", "100%").attr("stop-color", "rgba(2,6,23,0.95)");
+
+  svg.append("circle").attr("cx", w/2).attr("cy", h/2).attr("r", radius + 12).attr("fill", "none").attr("stroke", "rgba(56,189,248,0.25)").attr("stroke-width", "1.5");
+  svg.append("circle").attr("cx", w/2).attr("cy", h/2).attr("r", radius + 24).attr("fill", "none").attr("stroke", "rgba(56,189,248,0.1)").attr("stroke-width", "2");
+  svg.append("path").datum({type: "Sphere"}).attr("d", path).attr("fill", "url(#fsOceanGradient)").attr("stroke", "rgba(56,189,248,0.4)").attr("stroke-width", 1).style("filter", "drop-shadow(0 0 36px rgba(56,189,248,0.3))");
+  svg.append("path").datum(d3.geoGraticule()()).attr("d", path).attr("fill", "none").attr("stroke", "rgba(56,189,248,0.12)").attr("stroke-width", 0.5);
+  if (world) {
+    const land = topojson.feature(world, world.objects.countries);
+    svg.append("path").datum(land).attr("d", path).attr("fill", "rgba(15,118,110,0.7)").attr("stroke", "rgba(34,211,238,0.55)").attr("stroke-width", 0.7);
+  }
+  svg.append("circle").attr("cx", w/2).attr("cy", h/2).attr("r", radius).attr("fill", "url(#fsVignette)").style("pointer-events", "none");
+
+  const home = [14.42, 50.08];
+  if (isOnFront(home[0], home[1])) {
+    const p = proj(home);
+    if (p) {
+      svg.append("circle").attr("cx", p[0]).attr("cy", p[1]).attr("r", 16).attr("fill", "rgb(52,211,153)").attr("opacity", 0.25);
+      svg.append("circle").attr("cx", p[0]).attr("cy", p[1]).attr("r", 6).attr("fill", "rgb(52,211,153)").style("filter", "drop-shadow(0 0 8px rgb(52,211,153))");
+    }
+  }
+  const pts = globePoints || [];
+  if (pts.length) {
+    const maxHits = Math.max(1, d3.max(pts, d => d.hits));
+    pts.forEach(p => {
+      if (!isOnFront(p.lon, p.lat)) return;
+      const c = proj([p.lon, p.lat]); if (!c) return;
+      const r = 2 + Math.sqrt(p.hits / maxHits) * 14;
+      const interpolate = d3.geoInterpolate(home, [p.lon, p.lat]);
+      const segs = []; let cur = [];
+      for (let t = 0; t <= 1.001; t += 0.025) {
+        const pt = interpolate(t);
+        if (isOnFront(pt[0], pt[1])) cur.push(pt);
+        else if (cur.length > 1) { segs.push(cur); cur = []; }
+      }
+      if (cur.length > 1) segs.push(cur);
+      segs.forEach(s => svg.append("path").datum({type: "LineString", coordinates: s}).attr("d", path).attr("stroke", "rgba(248,113,113,0.55)").attr("stroke-width", 1).attr("fill", "none"));
+      const dist = d3.geoDistance(visibleCenter, [p.lon, p.lat]);
+      const fade = Math.max(0.25, 1 - Math.pow(dist / (Math.PI/2), 4));
+      const g = svg.append("g").style("cursor", "pointer").style("opacity", fade).on("click", () => showIntel(p.ip));
+      g.append("circle").attr("cx", c[0]).attr("cy", c[1]).attr("r", r + 8).attr("fill", "rgb(244,63,94)").attr("opacity", 0.25);
+      g.append("circle").attr("cx", c[0]).attr("cy", c[1]).attr("r", r).attr("fill", "rgb(248,113,113)").style("filter", "drop-shadow(0 0 6px rgb(248,113,113))")
+        .append("title").text(`${p.ip} · ${p.city||''} ${p.country||''} · ${p.hits} útoků`);
+    });
+  }
+  $("globe-fs-count").textContent = `${pts.length} útočníků viditelných`;
+}
+
+function setupFullscreenGlobe() {
+  const modal = $("globe-fullscreen-modal");
+  const svgEl = $("globe-fullscreen-svg");
+
+  $("globe-expand").addEventListener("click", () => {
+    modal.classList.add("show");
+    renderFullscreenGlobe();
+    if (!fsGlobeAnimating) {
+      fsGlobeAnimating = true;
+      d3.timer(() => {
+        if (!modal.classList.contains("show")) return;
+        if (!globeInteracting) globeRotation[0] = (globeRotation[0] + 0.2) % 360;
+        renderFullscreenGlobe();
+      }, 60);
+    }
+  });
+
+  const close = () => modal.classList.remove("show");
+  $("globe-fs-close").addEventListener("click", close);
+  document.addEventListener("keydown", e => { if (e.key === "Escape" && modal.classList.contains("show")) close(); });
+
+  // drag on fullscreen
+  let dragStart = null;
+  d3.select(svgEl).call(
+    d3.drag()
+      .on("start", e => { dragStart = { x: e.x, y: e.y, rot: [...globeRotation] }; svgEl.classList.add("dragging"); setGlobeInteracting(); })
+      .on("drag", e => {
+        if (!dragStart) return;
+        const sens = 0.5 / globeScale;
+        globeRotation[0] = dragStart.rot[0] + (e.x - dragStart.x) * sens;
+        globeRotation[1] = Math.max(-85, Math.min(85, dragStart.rot[1] - (e.y - dragStart.y) * sens));
+        setGlobeInteracting();
+        renderFullscreenGlobe();
+      })
+      .on("end", () => { dragStart = null; svgEl.classList.remove("dragging"); })
+  );
+  svgEl.addEventListener("wheel", e => {
+    e.preventDefault();
+    globeScale = Math.max(0.5, Math.min(3.5, globeScale * (1 - e.deltaY * 0.0015)));
+    setGlobeInteracting();
+    renderFullscreenGlobe();
+  }, { passive: false });
+
+  // Pinch-to-zoom (touch) for the fullscreen globe
+  let pinchDist = null;
+  const touchDist = t => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+  svgEl.addEventListener("touchstart", e => {
+    if (e.touches.length === 2) { pinchDist = touchDist(e.touches); setGlobeInteracting(); }
+  }, { passive: true });
+  svgEl.addEventListener("touchmove", e => {
+    if (e.touches.length === 2 && pinchDist) {
+      e.preventDefault();
+      const d = touchDist(e.touches);
+      globeScale = Math.max(0.5, Math.min(3.5, globeScale * (d / pinchDist)));
+      pinchDist = d;
+      setGlobeInteracting();
+      renderFullscreenGlobe();
+    }
+  }, { passive: false });
+  svgEl.addEventListener("touchend", e => { if (e.touches.length < 2) pinchDist = null; }, { passive: true });
+
+  window.addEventListener("resize", () => {
+    if (modal.classList.contains("show")) renderFullscreenGlobe();
+  });
+}
+setupFullscreenGlobe();
+
+// Initial traffic load (period-driven cadence, also fires after period chip click)
+refreshTraffic();
+setInterval(() => { if (!document.hidden) refreshTraffic(); }, 30000);
+</script>
+</body>
+</html>
