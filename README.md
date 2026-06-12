@@ -1,5 +1,7 @@
 # NetWatch 🛡️
 
+![CI](https://github.com/JackForest84/netwatch/actions/workflows/ci.yml/badge.svg)
+
 **A self-hosted, passive security dashboard for a home network.** It mirrors WAN
 traffic to an IDS, correlates every detected attacker with the firewall's verdict,
 enriches them with threat intelligence, and shows it all live — **without ever
