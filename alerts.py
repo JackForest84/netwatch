@@ -2,7 +2,9 @@
 from __future__ import annotations
 import time
 from collections import Counter
+from threading import Lock
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from typing import Any
 
 from store import store
@@ -51,7 +53,28 @@ def classify_intent(signature: str | None, category: str | None = "") -> str:
     return "other"
 
 
+# Short TTL cache: /api/overview + the Security tab call this every ~5 s with a small
+# set of distinct `hours` values; the aggregation runs ~8 GROUP BY scans over the
+# alerts table, so recomputing per request per viewer is the dashboard's hottest
+# cost (audit perf). 20 s staleness is fine for a security summary.
+_summary_cache: dict[float, tuple[float, dict]] = {}
+_summary_cache_lock = Lock()
+_SUMMARY_TTL = 20.0
+
+
 def alert_summary_from_store(hours: float = 24) -> dict[str, Any]:
+    now = time.time()
+    with _summary_cache_lock:
+        cached = _summary_cache.get(hours)
+        if cached and now - cached[0] < _SUMMARY_TTL:
+            return cached[1]
+    result = _alert_summary_uncached(hours)
+    with _summary_cache_lock:
+        _summary_cache[hours] = (now, result)
+    return result
+
+
+def _alert_summary_uncached(hours: float = 24) -> dict[str, Any]:
     """Compute aggregates from SQLite (canonical) — survives eve.json rotation.
 
     `hours` is the window for donuts/countries/sources/intent headline so the
@@ -60,7 +83,7 @@ def alert_summary_from_store(hours: float = 24) -> dict[str, Any]:
     now_ts = time.time()
     cutoff_24h = now_ts - hours * 3600   # window (param); var name kept for git-blame stability
     cutoff_1h = now_ts - 3600
-    now_local = datetime.now(timezone(timedelta(hours=2)))
+    now_local = datetime.now(ZoneInfo("Europe/Prague"))   # ne natvrdo +2 (rozbité v zimě)
 
     total_24h = store.alerts_count_period(hours)
     total_1h = store.alerts_count_period(1)
@@ -71,7 +94,7 @@ def alert_summary_from_store(hours: float = 24) -> dict[str, Any]:
     for i in range(24, 0, -1):
         slot_start = now_local - timedelta(hours=i)
         bucket_labels.append(slot_start.strftime("%H:00"))
-    for row in store._query("SELECT ts FROM alerts WHERE ts > ?", (cutoff_24h,)):
+    for row in store._query("SELECT ts FROM alerts WHERE ts > ?", (now_ts - 86400,)):
         h_ago = int((now_ts - row["ts"]) // 3600)
         if 0 <= h_ago < 24:
             buckets[23 - h_ago] += 1

@@ -1,4 +1,4 @@
-"""Admin dashboard for the mikrotiktraffic IDS server.
+"""Admin dashboard for the netwatch IDS server.
 
 Reads live data from:
   - systemd (service status, uptime)
@@ -13,18 +13,15 @@ from __future__ import annotations
 import json
 import logging
 import os
-import re
 import socket
-import subprocess
 import time
-from collections import Counter, deque
+from collections import Counter
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from threading import Lock, Thread
 from typing import Any
 
-import base64
-import maxminddb
+import ipaddress
 import psutil
 import secrets as _secrets
 from urllib.parse import parse_qs, quote
@@ -50,6 +47,9 @@ import traffic_tracker
 import netflow_collector
 import firewall_syslog
 import trends
+import anomaly
+import nw_speedtest
+import ai_explain
 import unifi_client
 import unifi_legacy
 from store import store
@@ -81,7 +81,7 @@ _SECURITY_HEADERS = {
     "Content-Security-Policy": (
         "default-src 'self'; "
         "script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdn.jsdelivr.net; "
-        "style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://fonts.googleapis.com; "
+        "style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdn.jsdelivr.net https://fonts.googleapis.com; "
         "font-src 'self' https://fonts.gstatic.com; "
         "img-src 'self' data:; "
         "connect-src 'self' https://cdn.jsdelivr.net; "
@@ -173,7 +173,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
     @staticmethod
     def _is_public(path: str) -> bool:
-        return path in ("/login", "/logout", "/favicon.ico") or path.startswith("/static/")
+        return path in ("/login", "/logout", "/favicon.ico", "/healthz") or path.startswith("/static/")
 
     async def dispatch(self, request, call_next):
         if config.DASHBOARD_PASS and not self._is_public(request.url.path):
@@ -186,7 +186,11 @@ class AuthMiddleware(BaseHTTPMiddleware):
                     target = target + "?" + request.url.query
                 return _apply_security_headers(
                     RedirectResponse("/login?next=" + quote(target, safe=""), status_code=303))
-        resp = await call_next(request)
+        try:
+            resp = await call_next(request)
+        except Exception:
+            log.warning("neošetřená chyba na %s", request.url.path, exc_info=True)
+            return _apply_security_headers(JSONResponse({"error": "internal"}, status_code=500))
         return _apply_security_headers(resp)
 
 
@@ -210,6 +214,7 @@ def _persist_loop() -> None:
     import time as _t
     _t.sleep(10)
     last_seen_ts = store.latest_alert_ts()
+    next_maintenance = _t.time() + 600   # první úklid ~10 min po startu, pak à 1 h
     while True:
         try:
             alerts = eve_tail.snapshot_alerts()
@@ -227,7 +232,9 @@ def _persist_loop() -> None:
                     datetime.fromisoformat(e["timestamp"]).timestamp() for e in new
                 )
             # Hourly maintenance: prune ALL tables past retention + incremental vacuum
-            if int(_t.time()) % 3600 < 30:
+            # (drift-proof plán; modulo okno se v 30s smyčce umělo minout — audit)
+            if _t.time() >= next_maintenance:
+                next_maintenance = _t.time() + 3600
                 try:
                     store.maintenance()
                 except Exception:
@@ -248,6 +255,8 @@ def _devices_persist_loop() -> None:
             online = [d for d in devs if d.get("online")]
             new_count, _ = store.upsert_devices(online)
             # snapshot
+            _db = config.STORE_DB_PATH
+            _wal = _db.with_suffix(".db-wal")
             store.insert_snapshot({
                 "suri_pkts": 0,
                 "suri_drops": 0,
@@ -255,6 +264,10 @@ def _devices_persist_loop() -> None:
                 "mt_cpu_pct": int((mt.get("resource") or {}).get("cpu-load", 0)) if mt else 0,
                 "eve_mb": EVE_PATH.stat().st_size / 1024 / 1024 if EVE_PATH.exists() else 0,
                 "devices_online": len(online),
+                "db_mb": round(_db.stat().st_size / 1048576, 1) if _db.exists() else 0,
+                "wal_mb": round(_wal.stat().st_size / 1048576, 1) if _wal.exists() else 0,
+                "disk_pct": psutil.disk_usage("/").percent,
+                "health_score": _build_health_status().get("score"),
             })
         except Exception:
             log.warning("devices persist loop iteration failed", exc_info=True)
@@ -275,6 +288,11 @@ def _dns_history_sampler() -> None:
                 rows: list[tuple] = []
                 for s in adguard_client.client.get_all():
                     stats = s.get("stats") or {}
+                    if (stats.get("time_units") or "hours") != "hours":
+                        # AdGuard retention >24h přepne pole na denní jednotky — zápis by rozbil grafy
+                        log.warning("dns sampler: %s má time_units=%r, přeskakuji",
+                                    s.get("name"), stats.get("time_units"))
+                        continue
                     q = stats.get("dns_queries") or []
                     b = stats.get("blocked_filtering") or []
                     n = len(q)
@@ -295,11 +313,43 @@ Thread(target=_persist_loop, daemon=True).start()
 Thread(target=_devices_persist_loop, daemon=True).start()
 enrich.start_background()
 firewall_log.start_background()
-notify.start_background()
+# notify.start_background()  # ntfy odstraněn ze serveru (2026-06-04) — broker zrušen, push loop vypnut
 traffic_tracker.start_background()
 netflow_collector.start_background()
 firewall_syslog.start_background()
 Thread(target=_dns_history_sampler, daemon=True).start()
+anomaly.start_background()
+nw_speedtest.start_background()
+
+
+def _cache_warmer() -> None:
+    """Drží horké cache stav-endpointů, ať request nikdy neplatí studenou cenu ani
+    nečeká na DB zámek (perf: 'načtení stavu' trvalo ~min při studené cache + kontenci
+    s background skeny). Každá položka se obnovuje ve své kadenci < jejího TTL."""
+    import time as _t
+    _t.sleep(15)
+    last: dict[str, float] = {}
+    jobs = [
+        ("health", 7, lambda: (_build_health_status(), _build_events_feed(25))),
+        ("alerts", 15, lambda: alert_summary_from_store(24)),
+        ("svc", 20, lambda: [service_status(u) for u, _, _ in SERVICES]),
+        ("suri", 20, suricata_socket_stat),
+        ("du", 45, lambda: disk_usage_dir("/var/log/suricata")),
+        ("trends", 45, trends.all_trends),
+    ]
+    while True:
+        now = _t.time()
+        for name, iv, fn in jobs:
+            if now - last.get(name, 0) >= iv:
+                try:
+                    fn()
+                except Exception:
+                    log.warning("cache warmer %s selhal", name, exc_info=True)
+                last[name] = _t.time()
+        _t.sleep(2)
+
+
+Thread(target=_cache_warmer, daemon=True).start()
 
 
 # ---------------------------------------------------------------------------
@@ -364,6 +414,22 @@ def _login_page(request: Request, *, next: str = "/", error: str = "", status: i
         "error": error,
     }, status_code=status)
     return _apply_security_headers(resp)
+
+
+@app.get("/healthz")
+def healthz() -> JSONResponse:
+    """Neautentizovaná liveness probe pro externí monitoring (Uptime Kuma).
+    Záměrně minimální — žádná citlivá data, jen up/degraded + pár counterů.
+    Keyword pro monitor: "ok"."""
+    try:
+        last = store.latest_alert_ts()
+        return JSONResponse({
+            "status": "ok",
+            "alerts_db_age_s": round(time.time() - last) if last else None,
+            "uptime_s": round(time.time() - psutil.boot_time()),
+        })
+    except Exception:
+        return JSONResponse({"status": "degraded"}, status_code=503)
 
 
 @app.get("/login", response_class=HTMLResponse)
@@ -566,11 +632,13 @@ def api_network() -> JSONResponse:
     }
 
     # Compact device list for UI
+    fs_map = {r["mac"]: r["first_seen"] for r in store._query("SELECT mac, first_seen FROM devices")}
     devices = []
     for d in devs:
         last_seen = d.get("last_seen")
         devices.append({
             "mac": d.get("mac"),
+            "first_seen": fs_map.get((d.get("mac") or "").upper()),
             "ip": d.get("ip"),
             "hostname": d.get("hostname"),
             "vendor": d.get("vendor") or "",
@@ -695,10 +763,13 @@ def api_firewall(hours: int = 24) -> JSONResponse:
             if en:
                 row["abuse_score"] = en.get("abuse_score")
                 row["vt_malicious"] = en.get("vt_malicious")
+    total = store._query("SELECT COUNT(*) AS n FROM firewall_drops WHERE ts > ?",
+                         (time.time() - hours * 3600,))
     return JSONResponse({
         "top": top,
         "recent": recent,
-        "total_24h": sum(r["hits"] for r in top),
+        # skutečný počet za okno (dřív suma top-15 vydávaná za celek, audit)
+        "total_24h": total[0]["n"] if total else 0,
     })
 
 
@@ -751,23 +822,15 @@ def api_outcome(hours: int = 24) -> JSONResponse:
 
 @app.get("/api/enrich/{ip}")
 def api_enrich(ip: str, force: bool = False) -> JSONResponse:
+    try:
+        ipaddress.ip_address(ip)
+    except ValueError:
+        return JSONResponse({"error": "neplatná IP adresa"}, status_code=400)
     data = enrich.lookup(ip, force=force)
     hist = store.attacker_history(ip, days=30)
     data["history"] = hist
     data["geoip"] = geo.lookup(ip)
     return JSONResponse(data)
-
-
-@app.get("/api/history")
-def api_history() -> JSONResponse:
-    """Long-term: 30d alert trend, top attackers, top countries."""
-    return JSONResponse({
-        "alerts_7d": store.alerts_count_period(hours=24 * 7),
-        "alerts_30d": store.alerts_count_period(hours=24 * 30),
-        "top_attackers_30d": store.top_attackers_period(hours=24 * 30, limit=15),
-    })
-
-
 
 
 @app.get("/api/health-status")
@@ -836,10 +899,10 @@ def api_attackers(hours: int = 24, limit: int = 300) -> JSONResponse:
                MAX(last_ts)  AS last_ts
         FROM (
             SELECT src_ip, COUNT(*) AS ids_hits, 0 AS fw_hits, MAX(ts) AS last_ts
-            FROM alerts WHERE ts > ? AND src_ip IS NOT NULL GROUP BY src_ip
+            FROM alerts INDEXED BY idx_alerts_ts WHERE ts > ? AND src_ip IS NOT NULL GROUP BY src_ip
             UNION ALL
             SELECT src_ip, 0 AS ids_hits, COUNT(*) AS fw_hits, MAX(ts) AS last_ts
-            FROM firewall_drops WHERE ts > ? AND src_ip IS NOT NULL GROUP BY src_ip
+            FROM firewall_drops INDEXED BY idx_drops_ts WHERE ts > ? AND src_ip IS NOT NULL GROUP BY src_ip
         )
         GROUP BY src_ip
         ORDER BY (SUM(ids_hits) + SUM(fw_hits)) DESC
@@ -877,12 +940,23 @@ def api_attackers(hours: int = 24, limit: int = 300) -> JSONResponse:
         {"code": cc, "flag": country_to_flag(cc), "count": n}
         for cc, n in countries.most_common(12)
     ]
+    # Poctivé součty přes CELÉ okno — seznam je top-N (LIMIT), takže len(out)
+    # lhal, jakmile útočníků bylo víc než limit (ADR 0003: nikdy neukazovat
+    # ořezané číslo jako celek).
+    tot_rows = store._query(
+        "SELECT (SELECT COUNT(*) FROM alerts WHERE ts > ?) AS ids_total, "
+        "(SELECT COUNT(*) FROM firewall_drops WHERE ts > ?) AS fw_total, "
+        "(SELECT COUNT(*) FROM (SELECT src_ip FROM alerts WHERE ts > ? AND src_ip IS NOT NULL "
+        "UNION SELECT src_ip FROM firewall_drops WHERE ts > ? AND src_ip IS NOT NULL)) AS n_ips",
+        (cutoff, cutoff, cutoff, cutoff))
+    t = tot_rows[0] if tot_rows else {"ids_total": 0, "fw_total": 0, "n_ips": 0}
     return JSONResponse({
         "hours": hours,
-        "total_ips": len(out),
-        "total_hits": sum(a["total"] for a in out),
-        "ids_total": sum(a["ids_hits"] for a in out),
-        "fw_total": sum(a["fw_hits"] for a in out),
+        "total_ips": t["n_ips"],
+        "total_hits": (t["ids_total"] or 0) + (t["fw_total"] or 0),
+        "ids_total": t["ids_total"] or 0,
+        "fw_total": t["fw_total"] or 0,
+        "shown": len(out),
         "top_countries": top_countries,
         "attackers": out,
     })
@@ -890,55 +964,32 @@ def api_attackers(hours: int = 24, limit: int = 300) -> JSONResponse:
 
 @app.get("/api/known-bad-attackers")
 def api_known_bad_attackers() -> JSONResponse:
-    """Detail of attackers with known-bad reputation that hit us in last 24h."""
+    """Detail of attackers with known-bad reputation that hit us in last 24h.
+    Jeden UNION dotaz + JOIN enrichment, bez LIMITu → count je úplný (dřív LIMIT
+    50+50 před mergem podhodnocoval, audit)."""
     cutoff = time.time() - 86400
     rows = store._query("""
-        SELECT a.src_ip AS ip,
-               COUNT(*) AS hits,
-               MAX(a.ts) AS last_ts,
-               MIN(a.ts) AS first_ts,
+        SELECT h.ip AS ip, SUM(h.hits) AS hits, MAX(h.last_ts) AS last_ts,
                e.abuse_score, e.abuse_reports, e.abuse_country, e.abuse_isp,
-               e.vt_malicious, e.vt_country, e.vt_as_owner
-        FROM alerts a
-        JOIN enrichment e ON a.src_ip = e.ip
-        WHERE a.ts > ?
-          AND (e.abuse_score >= 80 OR e.vt_malicious >= 5)
-          AND a.src_ip IS NOT NULL
-        GROUP BY a.src_ip
+               e.vt_malicious, e.vt_country, e.vt_as_owner,
+               CASE WHEN SUM(h.ids) > 0 AND SUM(h.fw) > 0 THEN 'ids+fw'
+                    WHEN SUM(h.ids) > 0 THEN 'ids' ELSE 'fw' END AS source
+        FROM (
+            SELECT src_ip AS ip, COUNT(*) AS hits, MAX(ts) AS last_ts, 1 AS ids, 0 AS fw
+            FROM alerts INDEXED BY idx_alerts_ts WHERE ts > ? AND src_ip IS NOT NULL GROUP BY src_ip
+            UNION ALL
+            SELECT src_ip, COUNT(*), MAX(ts), 0, 1
+            FROM firewall_drops INDEXED BY idx_drops_ts WHERE ts > ? AND src_ip IS NOT NULL GROUP BY src_ip
+        ) h
+        JOIN enrichment e ON h.ip = e.ip
+        WHERE e.abuse_score >= 80 OR e.vt_malicious >= 5
+        GROUP BY h.ip
         ORDER BY hits DESC
-        LIMIT 50
-    """, (cutoff,))
-
-    # Also include known-bad from firewall drops (probably more)
-    fw_rows = store._query("""
-        SELECT fd.src_ip AS ip,
-               COUNT(*) AS hits,
-               MAX(fd.ts) AS last_ts,
-               e.abuse_score, e.abuse_reports, e.abuse_country, e.abuse_isp,
-               e.vt_malicious, e.vt_country, e.vt_as_owner
-        FROM firewall_drops fd
-        JOIN enrichment e ON fd.src_ip = e.ip
-        WHERE fd.ts > ?
-          AND (e.abuse_score >= 80 OR e.vt_malicious >= 5)
-          AND fd.src_ip IS NOT NULL
-        GROUP BY fd.src_ip
-        ORDER BY hits DESC
-        LIMIT 50
-    """, (cutoff,))
-
-    # Merge by IP
-    merged: dict[str, dict] = {}
-    for r in rows:
-        merged[r["ip"]] = {**r, "source": "ids"}
-    for r in fw_rows:
-        if r["ip"] in merged:
-            merged[r["ip"]]["hits"] += r["hits"]
-            merged[r["ip"]]["source"] = "ids+fw"
-        else:
-            merged[r["ip"]] = {**r, "source": "fw"}
+    """, (cutoff, cutoff))
 
     out = []
-    for ip, row in merged.items():
+    for row in rows:
+        ip = row["ip"]
         g = geo.lookup(ip)
         out.append({
             "ip": ip,
@@ -953,8 +1004,43 @@ def api_known_bad_attackers() -> JSONResponse:
             "abuse_reports": row.get("abuse_reports"),
             "vt_malicious": row.get("vt_malicious"),
         })
-    out.sort(key=lambda x: x["hits"], reverse=True)
     return JSONResponse({"attackers": out, "count": len(out)})
+
+
+def _dns_leases_map() -> dict[str, str]:
+    """IP → hostname z DHCP leases + ruční katalog (katalog vyhrává)."""
+    from inventory import _NAME_OVERRIDES as _ip_overrides
+    leases_by_ip: dict[str, str] = {}
+    if mikrotik_client.client:
+        for l in mikrotik_client.client.get().get("leases", []):
+            ip = l.get("ip")
+            if ip and l.get("hostname"):
+                leases_by_ip[ip] = l["hostname"]
+    leases_by_ip.update(_ip_overrides)
+    return leases_by_ip
+
+
+def _enrich_dns_queries(recent: list, leases_by_ip: dict | None = None) -> None:
+    if leases_by_ip is None:
+        leases_by_ip = _dns_leases_map()
+    for q in recent:
+        client_ip = q.get("client")
+        if client_ip and client_ip in leases_by_ip:
+            q["client_hostname"] = leases_by_ip[client_ip]
+        reason = (q.get("reason") or "")
+        q["blocked"] = (reason.startswith("Filtered") or reason == "Rewrite") and not reason.startswith("NotFiltered")
+
+
+@app.get("/api/dns-search")
+def api_dns_search(q: str, limit: int = 100) -> JSONResponse:
+    """Hledání v AdGuard query logu za hranici 60 cached dotazů (audit UX).
+    Živý průchod na /control/querylog?search= obou instancí."""
+    q = (q or "").strip()[:120]
+    if not q or not adguard_client.client:
+        return JSONResponse({"q": q, "results": []})
+    results = adguard_client.client.search_querylog(q, limit=min(max(limit, 1), 300))
+    _enrich_dns_queries(results)
+    return JSONResponse({"q": q, "results": results})
 
 
 @app.get("/api/dns")
@@ -966,17 +1052,7 @@ def api_dns() -> JSONResponse:
     merged = adguard_client.client.merged()
     recent = adguard_client.client.recent_queries(60)
 
-    # DHCP lease lookup table (IP → hostname) from MikroTik,
-    # then apply manual name overrides (highest priority).
-    from inventory import _NAME_OVERRIDES as _ip_overrides
-    leases_by_ip: dict[str, str] = {}
-    if mikrotik_client.client:
-        for l in mikrotik_client.client.get().get("leases", []):
-            ip = l.get("ip")
-            if ip and l.get("hostname"):
-                leases_by_ip[ip] = l["hostname"]
-    # Manual overrides win over DHCP — e.g. gateway.home.arpa → Gateway MikroTik
-    leases_by_ip.update(_ip_overrides)
+    leases_by_ip = _dns_leases_map()
 
     # Enrich top_clients with hostnames
     for c in merged.get("top_clients", []):
@@ -986,14 +1062,7 @@ def api_dns() -> JSONResponse:
             c["ip"] = ip
 
     # Enrich recent_queries with client hostnames + add a "blocked" flag
-    for q in recent:
-        client_ip = q.get("client")
-        if client_ip and client_ip in leases_by_ip:
-            q["client_hostname"] = leases_by_ip[client_ip]
-        # AdGuard reason field: "FilteredBlackList", "FilteredSafeBrowsing", "FilteredParental",
-        # "Rewrite", "NotFilteredNotFound" (allowed), "NotFilteredWhiteList" (allowed)
-        reason = (q.get("reason") or "")
-        q["blocked"] = (reason.startswith("Filtered") or reason == "Rewrite") and not reason.startswith("NotFiltered")
+    _enrich_dns_queries(recent, leases_by_ip)
 
     return JSONResponse({
         "configured": True,
@@ -1060,8 +1129,8 @@ def api_topology() -> JSONResponse:
     # Monitoring cluster node .30 directly on MikroTik port 3
     arp_ips = {a.get("ip") for a in mt.get("arp", [])}
     add({"id": "monitoring", "kind": "server", "name": "Monitoring · cluster", "icon": "🖥️",
-         "detail": "192.168.50.30 · MikroTik port 3", "badges": ["cluster node"],
-         "state": "ok" if "192.168.50.30" in arp_ips else "unknown"})
+         "detail": "192.168.1.30 · MikroTik port 3", "badges": ["cluster node"],
+         "state": "ok" if "192.168.1.30" in arp_ips else "unknown"})
     link(mt_id, "monitoring")
 
     # UniFi infra: classify switches vs APs, then impose the confirmed hierarchy
@@ -1136,36 +1205,6 @@ def api_trends() -> JSONResponse:
     return JSONResponse(trends.all_trends())
 
 
-@app.get("/api/talkers")
-def api_talkers() -> JSONResponse:
-    """Top per-device talkers from ntopng + DPI app breakdown."""
-    if not ntopng_client.client:
-        return JSONResponse({"configured": False, "top_talkers": [], "apps": [], "system": {}})
-    snap = ntopng_client.client.get()
-    # Enrich top talkers with hostname from inventory if available
-    mt = mikrotik_client.client.get() if mikrotik_client.client else {}
-    un = unifi_client.client.get() if unifi_client.client else {}
-    devs = inventory.build(mt, un) if (mt or un) else []
-    by_ip = {d.get("ip"): d for d in devs if d.get("ip")}
-    for t in snap.get("top_talkers", []):
-        ip = t.get("ip")
-        # Manual name override wins (e.g. gateway.home.arpa → Gateway MikroTik)
-        if ip and ip in inventory._NAME_OVERRIDES:
-            t["hostname"] = inventory._NAME_OVERRIDES[ip]
-        elif ip in by_ip:
-            d = by_ip[ip]
-            t["hostname"] = d.get("hostname") or t.get("name")
-            t["mac"] = d.get("mac")
-            t["vendor"] = d.get("vendor")
-    return JSONResponse({
-        "configured": True,
-        "top_talkers": snap.get("top_talkers", [])[:15],
-        "apps": snap.get("apps", [])[:15],
-        "system": snap.get("system_stats", {}),
-        "last_error": snap.get("last_error"),
-    })
-
-
 @app.get("/api/attacker-geo")
 def api_attacker_geo() -> JSONResponse:
     """GeoIP-located attacker points for globe visualization."""
@@ -1188,32 +1227,6 @@ def api_attacker_geo() -> JSONResponse:
             "asn_org": g.get("asn_org"),
         })
     return JSONResponse({"points": points, "count": len(points)})
-
-
-@app.get("/api/monthly-traffic")
-def api_monthly_traffic(month: str | None = None) -> JSONResponse:
-    """Top per-device traffic for given YYYY-MM (default current)."""
-    devs = store.monthly_device_traffic(month)
-    # Enrich with hostname/MAC from inventory (talkers may have nicer names)
-    mt = mikrotik_client.client.get() if mikrotik_client.client else {}
-    un = unifi_client.client.get() if unifi_client.client else {}
-    invs = inventory.build(mt, un) if (mt or un) else []
-    by_ip = {d.get("ip"): d for d in invs if d.get("ip")}
-    for d in devs:
-        ip = d.get("ip")
-        if ip in by_ip:
-            inv = by_ip[ip]
-            if inv.get("hostname") and inv["hostname"] != inv.get("mac"):
-                d["name"] = inv["hostname"]
-            if inv.get("vendor"):
-                d["vendor"] = inv["vendor"]
-            d["uplink"] = inv.get("uplink")
-    return JSONResponse({
-        "month": month or time.strftime("%Y-%m", time.localtime()),
-        "devices": devs[:30],
-        "total_tx": sum(d["tx_bytes"] for d in devs),
-        "total_rx": sum(d["rx_bytes"] for d in devs),
-    })
 
 
 @app.get("/api/internet-usage")
@@ -1279,11 +1292,222 @@ def api_device_inet(hours: int = 24) -> JSONResponse:
             d["name"] = inventory._NAME_OVERRIDES.get(d["ip"])   # katalog i pro statické IP mimo inventář
     return JSONResponse({
         "devices": devs[:40],
+        "total_devices": len(devs),
         "total_down": sum(d["down_bytes"] for d in devs),
         "total_up": sum(d["up_bytes"] for d in devs),
         "window_h": hours,
         "collector": netflow_collector.collector.health(),
     })
+
+
+@app.get("/api/device-inet-live")
+def api_device_inet_live() -> JSONResponse:
+    """Kdo jede po internetu PRÁVĚ TEĎ — klouzavý průměr za ~1-2 min přímo
+    z paměti NetFlow kolektoru (poslední uzavřené okno + rozpracované).
+    Rozšíření ADR 0007; okno je poctivě přiznané v window_s (ADR 0003)."""
+    snap = netflow_collector.collector.live()
+    devs = snap["devices"][:30]
+    mt = mikrotik_client.client.get() if mikrotik_client.client else {}
+    un = unifi_client.client.get() if unifi_client.client else {}
+    invs = inventory.build(mt, un) if (mt or un) else []
+    by_ip = {d.get("ip"): d for d in invs if d.get("ip")}
+    for d in devs:
+        inv = by_ip.get(d["ip"])
+        if inv:
+            d["name"] = inv.get("hostname") or inv.get("name")
+            d["vendor"] = inv.get("vendor")
+        else:
+            d["name"] = inventory._NAME_OVERRIDES.get(d["ip"])
+    lp = snap.get("last_packet")
+    return JSONResponse({
+        "window_s": snap["window_s"],
+        "devices": devs,
+        "active_count": len(snap["devices"]),
+        "total_down_bps": sum(d["down_bps"] for d in snap["devices"]),
+        "total_up_bps": sum(d["up_bps"] for d in snap["devices"]),
+        "flow_age_s": round(time.time() - lp) if lp else None,
+    })
+
+
+@app.get("/api/device-inet-history")
+def api_device_inet_history(ip: str, hours: float = 24) -> JSONResponse:
+    """Časová řada internetu jednoho zařízení (audit UX: „kdo žral včera večer")."""
+    try:
+        ipaddress.ip_address(ip)
+    except ValueError:
+        return JSONResponse({"error": "neplatná IP adresa"}, status_code=400)
+    hours = min(max(hours, 1), 24 * 30)
+    bucket = 3600 if hours <= 48 else 86400
+    return JSONResponse({
+        "ip": ip,
+        "hours": hours,
+        "bucket_seconds": bucket,
+        "buckets": store.device_inet_history(ip, hours, bucket),
+    })
+
+
+@app.get("/api/capacity-trend")
+def api_capacity_trend(days: int = 30) -> JSONResponse:
+    """Růst dat (store.db/WAL/eve.json/disk) — denní snapshoty + okamžitý stav."""
+    days = min(max(days, 1), 30)
+    db = config.STORE_DB_PATH
+    wal = db.with_suffix(".db-wal")
+    return JSONResponse({
+        "days": days,
+        "history": store.capacity_history(days),
+        "now": {
+            "db_mb": round(db.stat().st_size / 1048576, 1) if db.exists() else 0,
+            "wal_mb": round(wal.stat().st_size / 1048576, 1) if wal.exists() else 0,
+            "eve_mb": round(EVE_PATH.stat().st_size / 1048576, 1) if EVE_PATH.exists() else 0,
+            "suri_dir_mb": round(disk_usage_dir("/var/log/suricata") / 1048576, 1),
+            "disk_pct": psutil.disk_usage("/").percent,
+        },
+    })
+
+
+@app.get("/api/anomalies")
+def api_anomalies(hours: float = 24) -> JSONResponse:
+    return JSONResponse({"anomalies": store.recent_anomalies(min(max(hours, 1), 24 * 90))})
+
+
+@app.get("/api/device-dns")
+def api_device_dns(ip: str, limit: int = 300) -> JSONResponse:
+    """DNS profil zařízení (vlna 1): co tahle krabička resolvuje. Živě z AdGuard
+    querylogu (search=ip matchne klienta), agregace top domén + blokované."""
+    try:
+        ipaddress.ip_address(ip)
+    except ValueError:
+        return JSONResponse({"error": "neplatná IP adresa"}, status_code=400)
+    if not adguard_client.client:
+        return JSONResponse({"ip": ip, "total": 0, "top": []})
+    rows = [q for q in adguard_client.client.search_querylog(ip, limit=min(max(limit, 50), 500))
+            if q.get("client") == ip]
+    _enrich_dns_queries(rows)
+    domains: Counter = Counter()
+    blocked: Counter = Counter()
+    for q in rows:
+        name = (q.get("question") or {}).get("name") or "?"
+        domains[name] += 1
+        if q.get("blocked"):
+            blocked[name] += 1
+    return JSONResponse({
+        "ip": ip,
+        "total": len(rows),
+        "blocked_total": sum(blocked.values()),
+        "top": [{"domain": d, "count": n, "blocked": blocked.get(d, 0)}
+                for d, n in domains.most_common(25)],
+    })
+
+
+@app.get("/api/ip-timeline")
+def api_ip_timeline(ip: str, hours: int = 48) -> JSONResponse:
+    """Časová osa jedné IP (vlna 2): hodinové buckety alertů+dropů + poslední alerty."""
+    try:
+        ipaddress.ip_address(ip)
+    except ValueError:
+        return JSONResponse({"error": "neplatná IP adresa"}, status_code=400)
+    hours = min(max(hours, 1), 24 * 30)
+    cut = time.time() - hours * 3600
+    al = {r["h"]: r["n"] for r in store._query(
+        "SELECT CAST(ts/3600 AS INT)*3600 AS h, COUNT(*) AS n FROM alerts "
+        "WHERE src_ip = ? AND ts > ? GROUP BY h", (ip, cut))}
+    dr = {r["h"]: r["n"] for r in store._query(
+        "SELECT CAST(ts/3600 AS INT)*3600 AS h, COUNT(*) AS n FROM firewall_drops "
+        "WHERE src_ip = ? AND ts > ? GROUP BY h", (ip, cut))}
+    buckets = [{"ts": h, "alerts": al.get(h, 0), "drops": dr.get(h, 0)}
+               for h in sorted(set(al) | set(dr))]
+    last = store._query(
+        "SELECT ts, signature, dst_port, severity FROM alerts WHERE src_ip = ? "
+        "ORDER BY ts DESC LIMIT 10", (ip,))
+    return JSONResponse({"ip": ip, "hours": hours, "buckets": buckets, "last_alerts": last})
+
+
+@app.get("/api/weekly-report")
+def api_weekly_report() -> JSONResponse:
+    """Týdenní souhrn (vlna 1) — plain Czech věty + čísla, posledních 7 dní vs předchozích 7."""
+    now = time.time()
+    w = 7 * 86400
+
+    def cnt(q: str, *p) -> int:
+        rows = store._query(q, p)
+        return (rows[0]["n"] or 0) if rows else 0
+
+    cur = {
+        "alerts": cnt("SELECT COUNT(*) AS n FROM alerts WHERE ts > ?", now - w),
+        "drops": cnt("SELECT COUNT(*) AS n FROM firewall_drops WHERE ts > ?", now - w),
+        "attackers": cnt("SELECT COUNT(*) AS n FROM (SELECT src_ip FROM alerts WHERE ts > ? AND src_ip IS NOT NULL "
+                         "UNION SELECT src_ip FROM firewall_drops WHERE ts > ? AND src_ip IS NOT NULL)", now - w, now - w),
+        "dns_q": cnt("SELECT SUM(queries) AS n FROM dns_history WHERE ts_hour > ?", now - w),
+        "dns_b": cnt("SELECT SUM(blocked) AS n FROM dns_history WHERE ts_hour > ?", now - w),
+        "anomalies": cnt("SELECT COUNT(*) AS n FROM anomalies WHERE ts > ?", now - w),
+    }
+    prev_alerts = cnt("SELECT COUNT(*) AS n FROM alerts WHERE ts BETWEEN ? AND ?", now - 2 * w, now - w)
+    top_atk = store._query(
+        "SELECT src_ip AS ip, COUNT(*) AS n FROM (SELECT src_ip, ts FROM alerts WHERE ts > ? AND src_ip IS NOT NULL "
+        "UNION ALL SELECT src_ip, ts FROM firewall_drops WHERE ts > ? AND src_ip IS NOT NULL) "
+        "GROUP BY src_ip ORDER BY n DESC LIMIT 1", (now - w, now - w))
+    top_port = store._query(
+        "SELECT dst_port, COUNT(*) AS n FROM firewall_drops WHERE ts > ? AND dst_port IS NOT NULL "
+        "GROUP BY dst_port ORDER BY n DESC LIMIT 1", (now - w,))
+    busiest = store._query(
+        "SELECT ip, SUM(down_bytes + up_bytes) AS b FROM device_inet WHERE ts > ? "
+        "GROUP BY ip ORDER BY b DESC LIMIT 1", (now - w,))
+    new_devs = store.devices_first_seen_recently(minutes=7 * 24 * 60)
+    wan = store.interface_traffic_period("wan", 7 * 24)
+
+    lines = []
+    trend = ""
+    if prev_alerts:
+        pct = round((cur["alerts"] - prev_alerts) * 100 / prev_alerts)
+        trend = f" ({'+' if pct >= 0 else ''}{pct} % proti minulému týdnu)"
+    lines.append(f"🛡️ IDS zachytil {cur['alerts']:,} alertů{trend}; firewall zahodil {cur['drops']:,} pokusů od {cur['attackers']:,} unikátních IP.".replace(",", " "))
+    if top_atk and top_atk[0]["ip"]:
+        g = geo.lookup(top_atk[0]["ip"])
+        lines.append(f"🥇 Nejotravnější IP: {top_atk[0]['ip']} ({g.get('country') or '?'}) — {top_atk[0]['n']:,} zásahů.".replace(",", " "))
+    if top_port:
+        lines.append(f"🚪 Nejčastěji zkoušený port: :{top_port[0]['dst_port']} ({top_port[0]['n']:,}× blokováno).".replace(",", " "))
+    rate = round(cur["dns_b"] * 100 / cur["dns_q"], 1) if cur["dns_q"] else 0
+    lines.append(f"🌐 DNS: {cur['dns_q']:,} dotazů, {cur['dns_b']:,} blokováno ({rate} %).".replace(",", " "))
+    lines.append(f"📶 Internet: ↓ {round((wan.get('rx_bytes') or 0) / 1e9, 1)} GB · ↑ {round((wan.get('tx_bytes') or 0) / 1e9, 1)} GB.")
+    if busiest and busiest[0]["ip"]:
+        import inventory as _inv
+        bname = _inv._NAME_OVERRIDES.get(busiest[0]["ip"]) or busiest[0]["ip"]
+        lines.append(f"🏆 Nejvíc stahoval: {bname} ({round(busiest[0]['b'] / 1e9, 1)} GB).")
+    if new_devs:
+        names = ", ".join((d.get("hostname") or d.get("mac") or "?") for d in new_devs[:5])
+        lines.append(f"📱 Nová zařízení ({len(new_devs)}): {names}{'…' if len(new_devs) > 5 else ''}.")
+    else:
+        lines.append("📱 Žádné nové zařízení v síti.")
+    if cur["anomalies"]:
+        lines.append(f"🔮 Detekováno {cur['anomalies']} anomálií proti normálu — detail ve feedu.")
+    lines.append("✅ Na službu neprošlo nic — perimetr bez port-forwardů drží.")
+    return JSONResponse({"window_days": 7, "stats": cur, "lines": lines,
+                         "generated": datetime.now().strftime("%Y-%m-%d %H:%M")})
+
+
+@app.get("/api/monthly-stats")
+def api_monthly_stats() -> JSONResponse:
+    """Měsíční agregáty navždy (vlna 2) — plní je maintenance, přežívají retenci."""
+    return JSONResponse({"months": store.monthly_stats()})
+
+
+@app.get("/api/speedtest")
+def api_speedtest(days: int = 7) -> JSONResponse:
+    hist = store.speedtest_history(min(max(days, 1), 90))
+    return JSONResponse({"history": hist, "last": hist[-1] if hist else None,
+                         "running": nw_speedtest._running.locked()})
+
+
+@app.post("/api/speedtest/run")
+def api_speedtest_run() -> JSONResponse:
+    started = nw_speedtest.run_async()
+    return JSONResponse({"started": started, "note": "výsledek za ~20–40 s v historii"})
+
+
+@app.get("/api/ai-explain")
+def api_ai_explain(signature: str, category: str = "") -> JSONResponse:
+    """AI vysvětlení signatury (vlna 3) — Claude Haiku, cache per signatura."""
+    return JSONResponse(ai_explain.explain(signature[:300], category[:100]))
 
 
 PERIOD_TO_HOURS = {
@@ -1337,25 +1561,33 @@ def api_firewall_rules() -> JSONResponse:
 @app.get("/api/wall-of-shame")
 def api_wall_of_shame(hours: float | None = None) -> JSONResponse:
     """All enriched attackers with VT or AbuseIPDB data — paginated grid for the UI.
-    `hours` restricts to IPs that actually hit the IDS within the window (Security
-    tab period filter); None = every known-bad IP in the enrichment cache."""
-    base_select = """
-        SELECT e.ip, e.abuse_score, e.abuse_reports, e.abuse_country, e.abuse_isp,
-               e.vt_malicious, e.vt_suspicious, e.vt_country, e.vt_as_owner,
-               e.fetched_at,
-               (SELECT COUNT(*) FROM alerts a WHERE a.src_ip = e.ip) AS our_hits,
-               (SELECT MAX(ts) FROM alerts a WHERE a.src_ip = e.ip) AS last_hit
-        FROM enrichment e
-        WHERE (COALESCE(e.abuse_score, 0) > 0 OR COALESCE(e.vt_malicious, 0) > 0)
-    """
-    order = " ORDER BY COALESCE(e.abuse_score,0)*COALESCE(e.vt_malicious,1) DESC LIMIT 200"
+    `hours` restricts to IPs that actually hit the IDS within the window; our_hits/
+    last_hit pak respektují stejné okno (audit). Tier počty se počítají z plné sady,
+    grid je top 200."""
     if hours:
-        rows = store._query(
-            base_select + " AND e.ip IN (SELECT DISTINCT src_ip FROM alerts WHERE ts > ?)" + order,
-            (time.time() - hours * 3600,),
-        )
+        cut = time.time() - hours * 3600
+        rows = store._query("""
+            SELECT e.ip, e.abuse_score, e.abuse_reports, e.abuse_country, e.abuse_isp,
+                   e.vt_malicious, e.vt_suspicious, e.vt_country, e.vt_as_owner,
+                   e.fetched_at,
+                   (SELECT COUNT(*) FROM alerts a WHERE a.src_ip = e.ip AND a.ts > ?) AS our_hits,
+                   (SELECT MAX(ts) FROM alerts a WHERE a.src_ip = e.ip AND a.ts > ?) AS last_hit
+            FROM enrichment e
+            WHERE (COALESCE(e.abuse_score, 0) > 0 OR COALESCE(e.vt_malicious, 0) > 0)
+              AND e.ip IN (SELECT DISTINCT src_ip FROM alerts WHERE ts > ?)
+            ORDER BY COALESCE(e.abuse_score,0)*COALESCE(e.vt_malicious,1) DESC
+        """, (cut, cut, cut))
     else:
-        rows = store._query(base_select + order)
+        rows = store._query("""
+            SELECT e.ip, e.abuse_score, e.abuse_reports, e.abuse_country, e.abuse_isp,
+                   e.vt_malicious, e.vt_suspicious, e.vt_country, e.vt_as_owner,
+                   e.fetched_at,
+                   (SELECT COUNT(*) FROM alerts a WHERE a.src_ip = e.ip) AS our_hits,
+                   (SELECT MAX(ts) FROM alerts a WHERE a.src_ip = e.ip) AS last_hit
+            FROM enrichment e
+            WHERE (COALESCE(e.abuse_score, 0) > 0 OR COALESCE(e.vt_malicious, 0) > 0)
+            ORDER BY COALESCE(e.abuse_score,0)*COALESCE(e.vt_malicious,1) DESC
+        """)
     out = []
     for r in rows:
         g = geo.lookup(r["ip"]) if r["ip"] else {}
@@ -1390,7 +1622,8 @@ def api_wall_of_shame(hours: float | None = None) -> JSONResponse:
         "high":     sum(1 for a in out if a["tier"] == "high"),
         "medium":   sum(1 for a in out if a["tier"] == "medium"),
         "clean":    sum(1 for a in out if a["tier"] == "clean"),
-        "attackers": out,
+        "shown":    min(len(out), 200),
+        "attackers": out[:200],
     })
 
 
@@ -1455,35 +1688,6 @@ def api_wan_lan_history(period: str = "24h") -> JSONResponse:
         "lan": store.interface_traffic_history("lan", hours, bucket),
         "vpn": store.interface_traffic_history("vpn", hours, bucket),
     })
-
-
-@app.get("/api/flow-matrix")
-def api_flow_matrix() -> JSONResponse:
-    """Top device-to-internet flow pairs based on ntopng hosts + DNS top clients.
-
-    For homelab this means: top local device → top external ASNs they reach.
-    """
-    if not ntopng_client.client:
-        return JSONResponse({"matrix": [], "configured": False})
-    snap = ntopng_client.client.get()
-    hosts = snap.get("hosts_local", [])
-    matrix = []
-    for h in hosts[:15]:
-        if (h.get("tx_bytes") or 0) + (h.get("rx_bytes") or 0) == 0:
-            continue
-        name = h.get("name") or h.get("ip") or "?"
-        if name.startswith("fe80:"):
-            continue
-        matrix.append({
-            "ip": h.get("ip"),
-            "name": name.split(" ")[0],
-            "tx_bytes": h.get("tx_bytes", 0),
-            "rx_bytes": h.get("rx_bytes", 0),
-            "active_flows": h.get("active_flows", 0),
-            "country": h.get("country"),
-        })
-    matrix.sort(key=lambda x: x["tx_bytes"] + x["rx_bytes"], reverse=True)
-    return JSONResponse({"matrix": matrix[:15], "configured": True})
 
 
 @app.get("/api/health")

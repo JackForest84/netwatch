@@ -84,6 +84,14 @@ class AdGuardInstance:
         with self.lock:
             return dict(self.snapshot)
 
+    def search_querylog(self, text: str, limit: int = 100) -> list[dict]:
+        """Živé hledání v query logu instance (na vyžádání, mimo poll cache)."""
+        try:
+            ql = self._get("/control/querylog", params={"search": text, "limit": limit})
+            return ql.get("data", []) if isinstance(ql, dict) else []
+        except Exception:
+            return []
+
 
 class AdGuardClient:
     """Multi-instance wrapper. Provides per-instance and merged views."""
@@ -151,6 +159,16 @@ class AdGuardClient:
                 for s in snaps
             ],
         }
+
+    def search_querylog(self, text: str, limit: int = 100) -> list[dict]:
+        out: list[dict] = []
+        for inst in self.instances:
+            for q in inst.search_querylog(text, limit):
+                q = dict(q)
+                q["__instance"] = inst.name
+                out.append(q)
+        out.sort(key=lambda x: x.get("time", ""), reverse=True)
+        return out[:limit]
 
     def recent_queries(self, limit: int = 30) -> list[dict]:
         """Most recent queries across instances, sorted by time desc."""

@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from threading import Thread
 
 import mikrotik_client
 import ntopng_client
 from store import store
+
+log = logging.getLogger("netwatch")
 
 SNAPSHOT_INTERVAL_S = 5 * 60
 
@@ -24,6 +27,8 @@ def _classify_interface(name: str, kind: str | None, comment: str | None) -> str
     comment_l = (comment or "").lower()
     if "wan" in comment_l or name_l == "ether5":
         return "wan"
+    if kind == "lte":
+        return "wan"   # LTE failover = taky WAN (jinak se provoz při výpadku optiky nepočítá)
     if kind == "wg" or "vpn" in comment_l or "vpn" in name_l:
         return "vpn"
     # LAN = bridge aggregate only (single source of truth for internal traffic)
@@ -80,11 +85,11 @@ def _loop() -> None:
         try:
             _snapshot_devices()
         except Exception:
-            pass
+            log.warning("snapshot zařízení selhal", exc_info=True)
         try:
             _snapshot_interfaces()
         except Exception:
-            pass
+            log.warning("snapshot rozhraní selhal", exc_info=True)
         time.sleep(SNAPSHOT_INTERVAL_S)
 
 

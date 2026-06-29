@@ -10,6 +10,7 @@ falls into the raw column for later inspection.
 
 from __future__ import annotations
 
+import logging
 import re
 import time
 from datetime import datetime, timezone, timedelta
@@ -19,6 +20,8 @@ from typing import Iterable
 import config
 import mikrotik_client
 from store import store
+
+log = logging.getLogger("netwatch")
 
 # Common parts
 _RE_IP_PORT = r"(?P<src_ip>\d{1,3}(?:\.\d{1,3}){3})(?::(?P<src_port>\d+))?->(?P<dst_ip>\d{1,3}(?:\.\d{1,3}){3})(?::(?P<dst_port>\d+))?"
@@ -141,7 +144,7 @@ def _loop() -> None:
                 if len(seen_msgs) > 5000:
                     seen_msgs = set(list(seen_msgs)[-2500:])
         except Exception:
-            pass
+            log.warning("firewall_log smyčka selhala", exc_info=True)
         time.sleep(30)
 
 

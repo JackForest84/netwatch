@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 import time
 from threading import Thread
@@ -11,6 +12,8 @@ import requests
 
 import config
 from store import store
+
+log = logging.getLogger("netwatch")
 
 PRIVATE = re.compile(r"^(10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[0-1])\.|127\.|169\.254\.)")
 
@@ -119,7 +122,7 @@ def background_enrich_top_attackers() -> None:
                 # VT free tier: 4/min. Sleep between calls.
                 time.sleep(20)
         except Exception:
-            pass
+            log.warning("enrich smyčka selhala", exc_info=True)
         time.sleep(config.ENRICH_INTERVAL_MIN * 60)
 
 

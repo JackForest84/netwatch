@@ -1,12 +1,15 @@
 """System / service status helpers: systemd, Redis, Suricata socket stats, net sampler."""
 from __future__ import annotations
 import json
+import logging
 import subprocess
 import time
 from datetime import datetime
 from threading import Lock, Thread
 from typing import Any
 import psutil
+
+log = logging.getLogger("netwatch")
 
 SERVICES = [
     ("suricata-wan", "Suricata", "Sleduje provoz tvé sítě a poznává útoky podle 47 000 pravidel (port skeny, brute-force, exploity, botnety, malware komunikace). Když najde podezřelý paket, vytvoří alert."),
@@ -15,11 +18,23 @@ SERVICES = [
     ("tzsp-replay", "TZSP replay", "MikroTik zrcadlí WAN traffic přes TZSP protokol do téhle aplikace. tzsp-replay ho rozbalí a pošle na rozhraní dummy0, kde si ho Suricata + ntopng vyzvedávají."),
     ("redis-server", "Redis", "In-memory databáze pro ntopng. Drží statistiky, deduplikační hashe, krátkodobou historii toků. 512MB max, LRU policy."),
     ("geoipupdate.timer", "GeoIP update", "Týdně stahuje aktuální databázi GeoIP2 od MaxMind. Díky tomu vidíš u každé IP zemi + ASN."),
-    ("admin-dashboard", "NetWatch UI", "Tahle webová aplikace. FastAPI + SQLite, agreguje data z Suricaty, MikroTiku, UniFi, AdGuardu a posílá push notifikace."),
-    ("ntfy", "ntfy", "Push notifikační server. Když se něco vážného stane, dostaneš zprávu do mobilu (self-hosted, žádný cloud)."),
+    ("admin-dashboard", "NetWatch UI", "Tahle webová aplikace. FastAPI + SQLite, agreguje data z Suricaty, MikroTiku, UniFi, AdGuardu."),
 ]
 NTOPNG_PORT = 3000
 EVEBOX_PORT = 5636
+
+
+_proc_cache: dict[int, psutil.Process] = {}
+
+
+def _proc(pid: int) -> psutil.Process:
+    """Cachovaný psutil.Process per PID — drží baseline pro cpu_percent(interval=None)."""
+    p = _proc_cache.get(pid)
+    if p is None:
+        p = psutil.Process(pid)
+        _proc_cache[pid] = p
+        p.cpu_percent(interval=None)   # prime delta baseline
+    return p
 
 
 def _systemctl(*args: str) -> str:
@@ -35,7 +50,7 @@ def _systemctl(*args: str) -> str:
 # (audit perf #1: was ~570 ms / 5 s budget, ~22 % of single-worker event loop).
 _svc_cache: dict[str, tuple[float, dict]] = {}
 _svc_cache_lock = Lock()
-_SVC_TTL = 10.0
+_SVC_TTL = 25.0
 
 
 def service_status(unit: str) -> dict[str, Any]:
@@ -74,11 +89,16 @@ def _service_status_uncached(unit: str) -> dict[str, Any]:
             elif k == "MainPID" and v.isdigit() and int(v) > 0:
                 info["pid"] = int(v)
             elif k == "MemoryCurrent" and v.isdigit():
-                info["mem_mb"] = round(int(v) / (1024 * 1024), 1)
+                info["mem_mb_cgroup"] = round(int(v) / (1024 * 1024), 1)  # vč. page cache, nepoužité v UI
         if info["pid"]:
             try:
-                p = psutil.Process(info["pid"])
-                info["cpu_pct"] = round(p.cpu_percent(interval=0.05), 1)
+                p = _proc(info["pid"])
+                # RSS, ne cgroup memory.current (to počítá i page cache → EveBox „1700 MB")
+                info["mem_mb"] = round(p.memory_info().rss / (1024 * 1024), 1)
+                # cpu_percent(interval=None) = % od minulého volání na CACHOVANÉM Process;
+                # 10s cache service_status volání rozestoupí → reálná delta (nový Process
+                # nebo 50ms okno čte vždy ~0).
+                info["cpu_pct"] = round(p.cpu_percent(interval=None), 1)
             except Exception:
                 pass
     return info
@@ -108,28 +128,34 @@ class NetSampler:
         Thread(target=self._run, daemon=True).start()
 
     def _run(self) -> None:
-        prev = psutil.net_io_counters(pernic=True)
+        try:
+            prev = psutil.net_io_counters(pernic=True)
+        except Exception:
+            prev = {}
         prev_ts = time.time()
         while True:
             time.sleep(2)
-            now = psutil.net_io_counters(pernic=True)
-            now_ts = time.time()
-            dt = now_ts - prev_ts or 1
-            with self.lock:
-                for iface in self.interfaces:
-                    if iface not in now or iface not in prev:
-                        continue
-                    a, b = prev[iface], now[iface]
-                    self.samples[iface] = {
-                        "rx_bps": (b.bytes_recv - a.bytes_recv) * 8 / dt,
-                        "tx_bps": (b.bytes_sent - a.bytes_sent) * 8 / dt,
-                        "rx_pps": (b.packets_recv - a.packets_recv) / dt,
-                        "tx_pps": (b.packets_sent - a.packets_sent) / dt,
-                        "rx_total": b.bytes_recv,
-                        "tx_total": b.bytes_sent,
-                    }
-            prev = now
-            prev_ts = now_ts
+            try:
+                now = psutil.net_io_counters(pernic=True)
+                now_ts = time.time()
+                dt = now_ts - prev_ts or 1
+                with self.lock:
+                    for iface in self.interfaces:
+                        if iface not in now or iface not in prev:
+                            continue
+                        a, b = prev[iface], now[iface]
+                        self.samples[iface] = {
+                            "rx_bps": (b.bytes_recv - a.bytes_recv) * 8 / dt,
+                            "tx_bps": (b.bytes_sent - a.bytes_sent) * 8 / dt,
+                            "rx_pps": (b.packets_recv - a.packets_recv) / dt,
+                            "tx_pps": (b.packets_sent - a.packets_sent) / dt,
+                            "rx_total": b.bytes_recv,
+                            "tx_total": b.bytes_sent,
+                        }
+                prev = now
+                prev_ts = now_ts
+            except Exception:
+                log.warning("net sampler iterace selhala", exc_info=True)
 
     def get(self, iface: str) -> dict:
         with self.lock:
@@ -143,7 +169,24 @@ net_sampler = NetSampler(["ens18", "dummy0"])
 # Suricata-specific
 # ---------------------------------------------------------------------------
 
+_suri_cache: dict[str, tuple[float, dict]] = {}
+_suri_lock = Lock()
+_SURI_TTL = 30.0
+
+
 def suricata_socket_stat() -> dict[str, Any]:
+    now = time.time()
+    with _suri_lock:
+        c = _suri_cache.get("dummy0")
+        if c and now - c[0] < _SURI_TTL:
+            return c[1]
+    val = _suricata_socket_stat_uncached()
+    with _suri_lock:
+        _suri_cache["dummy0"] = (now, val)
+    return val
+
+
+def _suricata_socket_stat_uncached() -> dict[str, Any]:
     try:
         raw = subprocess.check_output(
             ["suricatasc", "-c", "iface-stat dummy0"], text=True, timeout=2
@@ -154,7 +197,26 @@ def suricata_socket_stat() -> dict[str, Any]:
         return {}
 
 
+# 60 s TTL cache — `du -sb` recursively walks /var/log/suricata (hundreds of MB of
+# rotated eve.json*) on every /api/overview hit; the size changes slowly (audit perf).
+_du_cache: dict[str, tuple[float, int]] = {}
+_du_cache_lock = Lock()
+_DU_TTL = 60.0
+
+
 def disk_usage_dir(path: str) -> int:
+    now = time.time()
+    with _du_cache_lock:
+        cached = _du_cache.get(path)
+        if cached and now - cached[0] < _DU_TTL:
+            return cached[1]
+    val = _disk_usage_dir_uncached(path)
+    with _du_cache_lock:
+        _du_cache[path] = (now, val)
+    return val
+
+
+def _disk_usage_dir_uncached(path: str) -> int:
     try:
         out = subprocess.check_output(["du", "-sb", path], text=True, timeout=3, stderr=subprocess.DEVNULL)
         return int(out.split()[0])

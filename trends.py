@@ -5,6 +5,8 @@ from __future__ import annotations
 import time
 from typing import Any
 
+from threading import Lock
+
 from store import store
 
 
@@ -40,7 +42,7 @@ def attackers_trend() -> dict[str, Any]:
 def devices_trend() -> dict[str, Any]:
     now = time.time()
     cur = store._query("SELECT COUNT(*) AS n FROM devices WHERE last_seen > ?", (now - 3600,))[0]["n"]
-    prev = store._query("SELECT COUNT(*) AS n FROM devices WHERE last_seen BETWEEN ? AND ?", (now - 7 * 86400, now - 6 * 86400))[0]["n"]
+    prev = store._query("SELECT COUNT(*) AS n FROM devices WHERE last_seen BETWEEN ? AND ?", (now - 7 * 86400, now - 7 * 86400 + 3600))[0]["n"]
     return _delta(cur, prev)
 
 
@@ -101,7 +103,24 @@ def attacker_geo_points(hours: int = 24, limit: int = 200) -> list[dict[str, Any
     return rows
 
 
+_trends_cache: tuple[float, dict] | None = None
+_trends_lock = Lock()
+_TRENDS_TTL = 60.0
+
+
 def all_trends() -> dict[str, Any]:
+    global _trends_cache
+    now = time.time()
+    with _trends_lock:
+        if _trends_cache and now - _trends_cache[0] < _TRENDS_TTL:
+            return _trends_cache[1]
+    val = _all_trends_uncached()
+    with _trends_lock:
+        _trends_cache = (now, val)
+    return val
+
+
+def _all_trends_uncached() -> dict[str, Any]:
     return {
         "alerts": alerts_trend(),
         "drops": drops_trend(),

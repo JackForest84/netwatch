@@ -1,12 +1,14 @@
 """eve.json tail: background thread keeping a rolling window of recent Suricata events."""
 from __future__ import annotations
 import json
+import logging
 import time
 from collections import deque
 from pathlib import Path
 from threading import Lock, Thread
 
 EVE_PATH = Path("/var/log/suricata/eve.json")
+log = logging.getLogger("netwatch")
 
 
 class EveTail:
@@ -28,11 +30,13 @@ class EveTail:
         self.thread.start()
 
     def _seed_from_tail(self) -> None:
-        """Read last 2 MB so the live tail is warm; SQLite holds the 30d history."""
+        """Seed z posledních 32 MB (≈3–4 h provozu): po delším výpadku dashboardu
+        při běžící Suricatě se alerty z mezidobí dopersistují do SQLite (audit;
+        2 MB ≈ 13 min nestačilo). Deques jsou bounded, parse je jednorázový."""
         try:
             size = self.path.stat().st_size
             with self.path.open("rb") as f:
-                start = max(0, size - 2 * 1024 * 1024)
+                start = max(0, size - 32 * 1024 * 1024)
                 f.seek(start)
                 if start > 0:
                     f.readline()  # discard partial line
@@ -61,6 +65,10 @@ class EveTail:
             except FileNotFoundError:
                 time.sleep(2)
                 continue
+            except Exception:
+                log.warning("eve.json stat selhalo", exc_info=True)
+                time.sleep(2)
+                continue
             if self.inode is None or st.st_ino != self.inode or st.st_size < self.pos:
                 self.inode = st.st_ino
                 self.pos = 0
@@ -75,7 +83,7 @@ class EveTail:
                             else:
                                 break
                 except Exception:
-                    pass
+                    log.warning("eve.json čtení selhalo", exc_info=True)
             time.sleep(1)
 
     def snapshot(self) -> list[dict]:

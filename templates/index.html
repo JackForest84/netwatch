@@ -454,6 +454,7 @@
           <div class="flex-1 min-w-0">
             <div class="flex items-center gap-3 mb-3">
               <span id="health-emoji" class="text-5xl">⏳</span>
+              <div id="health-score-ring" class="hidden score-ring shrink-0" title="Skóre zdraví sítě 0–100: služby, integrace, pipeline, disk, kritické alerty, anomálie"><div><span id="health-score" class="text-lg font-mono text-slate-100">—</span><span class="text-[8px] text-slate-500 ml-0.5">/100</span></div></div>
               <div>
                 <div id="health-headline" class="hero-title text-2xl md:text-3xl leading-tight">Načítám stav…</div>
                 <div id="health-sub" class="text-slate-400 text-sm mt-1">—</div>
@@ -542,7 +543,7 @@
           <div id="kpi-devices" class="stat-num text-cyan-300">—</div>
           <div id="kpi-devices-delta" class="text-xs font-medium">—</div>
         </div>
-        <div class="text-[11px] text-slate-500 mt-0.5">📶 <span id="kpi-wifi">—</span> WiFi · 🔌 <span id="kpi-wired">—</span> drát · 🛰️ <span id="kpi-infra">—</span> infra</div>
+        <div class="text-[11px] text-slate-500 mt-0.5">📶 <span id="kpi-wifi">—</span> WiFi · 🔌 <span id="kpi-wired">—</span> drát · 🛰️ <span id="kpi-infra">—</span> infra · <span title="online bez UniFi klasifikace (jen DHCP/ARP záznam)">➕ <span id="kpi-other">—</span> ost.</span></div>
       </div>
     </div>
 
@@ -680,9 +681,34 @@
         </h2>
         <span class="text-[10px] text-slate-500 font-mono" id="dev-inet-meta">—</span>
       </div>
+      <div id="dev-inet-live" class="hidden mb-3 p-2.5 rounded-lg bg-slate-800/40 border border-emerald-500/20">
+        <div class="flex items-center justify-between mb-1.5">
+          <span class="text-[11px] font-semibold text-emerald-300">
+            <span class="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse mr-1"></span>Právě teď
+            <span class="text-slate-500 font-normal" id="dil-window"></span>
+            <span class="tip" data-tip="Aktuální internetový provoz po zařízeních — klouzavý průměr za poslední ~1–2 min z NetFlow (flow záznamy chodí při expiraci, kratší okno by lhalo). Obnovuje se každých 5 s.">ⓘ</span>
+          </span>
+          <span class="text-[10px] font-mono text-slate-400" id="dil-total">—</span>
+        </div>
+        <div id="dil-list" class="space-y-1"></div>
+      </div>
       <div id="dev-inet-list" class="space-y-2 max-h-96 overflow-auto scrollbar">
         <div class="text-slate-500 text-xs py-4 text-center">sbírám NetFlow (první data ~1 min po startu)…</div>
       </div>
+    </div>
+
+    <!-- Týdenní souhrn (vlna 1) -->
+    <div class="card p-4">
+      <div class="flex items-center justify-between mb-2">
+        <h2 class="text-sm font-semibold text-slate-100">📅 Týdenní souhrn
+          <span class="tip" data-tip="Automaticky generovaný souhrn posledních 7 dní lidskou řečí — co se na síti dělo, kdo útočil, kdo stahoval. Tlačítkem zkopíruješ jako text.">ⓘ</span>
+        </h2>
+        <div class="flex items-center gap-2">
+          <span id="wr-meta" class="text-[10px] text-slate-500 font-mono">—</span>
+          <button class="chip" onclick="copyWeekly(this)">kopírovat</button>
+        </div>
+      </div>
+      <div id="wr-lines" class="space-y-1 text-xs text-slate-300">načítám…</div>
     </div>
 
     <!-- ROW 4: Heatmap + Timeline -->
@@ -817,7 +843,7 @@
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
       <div class="card p-3.5">
         <div class="flex items-center justify-between mb-2">
-          <h2 class="section-label">Top útočící IP · 24h <span class="text-slate-600 font-normal">(klik = threat intel)</span></h2>
+          <h2 class="section-label">Top útočící IP · <span class="sec-period-label">24h</span> <span class="text-slate-600 font-normal">(klik = threat intel)</span></h2>
           <button class="chip" style="background:rgba(244,63,94,0.12);color:#fb7185;border:1px solid rgba(244,63,94,0.35)" onclick="showAllAttackers()">🌍 Všichni útočníci →</button>
         </div>
         <div class="overflow-x-auto scrollbar"><table class="w-full compact">
@@ -826,7 +852,7 @@
         </table></div>
       </div>
       <div class="card p-3.5">
-        <h2 class="section-label mb-2">Top signatury · 24h</h2>
+        <h2 class="section-label mb-2">Top signatury · <span class="sec-period-label">24h</span></h2>
         <div class="overflow-x-auto scrollbar"><table class="w-full compact">
           <thead class="text-[10px] uppercase text-slate-500 border-b border-slate-800"><tr><th class="text-left pl-1">Signatura</th><th class="text-right pr-1">Zásahy</th></tr></thead>
           <tbody id="top-sigs" class="divide-y divide-slate-800/60 text-xs"></tbody>
@@ -862,6 +888,21 @@
 
   <!-- ====================== SÍŤ ====================== -->
   <div id="tab-network" class="tab-content space-y-3">
+    <div class="card p-4">
+      <div class="flex items-center justify-between mb-2">
+        <h2 class="section-label">🚀 Rychlost internetu
+          <span class="tip" data-tip="Měřeno ze serveru přes Cloudflare (download 25 MB + upload 8 MB + TCP latence na 1.1.1.1). Automaticky každých 6 hodin — důkazní historie pro 'internet je pomalý'.">ⓘ</span>
+        </h2>
+        <button class="chip" id="spd-run" onclick="runSpeedtest()">⏱ změřit teď</button>
+      </div>
+      <div class="grid grid-cols-3 gap-3 mb-2">
+        <div><div class="text-[10px] text-slate-500">↓ download</div><div id="spd-down" class="stat-num text-emerald-300">—</div></div>
+        <div><div class="text-[10px] text-slate-500">↑ upload</div><div id="spd-up" class="stat-num text-cyan-300">—</div></div>
+        <div><div class="text-[10px] text-slate-500">latence</div><div id="spd-lat" class="stat-num text-slate-200">—</div></div>
+      </div>
+      <div class="h-24"><canvas id="chart-speedtest"></canvas></div>
+      <div class="text-[10px] text-slate-500 mt-1" id="spd-meta">zatím žádné měření — první proběhne ~5 min po startu služby</div>
+    </div>
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
       <div class="card p-3.5">
         <div class="flex items-center justify-between mb-2"><h2 class="section-label">MikroTik · stav</h2><span id="mikrotik-version" class="text-[10px] text-slate-500 font-mono">—</span></div>
@@ -942,6 +983,7 @@
         </h2>
         <div class="flex items-center gap-2">
           <span id="dns-stream-meta" class="text-[10px] text-slate-500 font-mono">—</span>
+          <input id="dns-search" type="search" placeholder="🔎 doména/klient… (Enter = historie)" class="px-2 py-1 rounded-lg bg-slate-800/50 border border-slate-700 text-[11px] text-slate-200 placeholder-slate-500 focus:outline-none focus:border-cyan-500 w-56" />
           <div class="flex items-center gap-1">
             <button class="chip active" data-dnsfilter="all">Vše</button>
             <button class="chip" data-dnsfilter="blocked">🔴 blokované</button>
@@ -974,8 +1016,11 @@
           <button class="chip active" data-filter="online">Online <span id="inv-c-online" class="text-slate-600">·—</span></button>
           <button class="chip" data-filter="infra">Infra <span id="inv-c-infra" class="text-slate-600">·—</span></button>
           <button class="chip" data-filter="all">Vše <span id="inv-c-all" class="text-slate-600">·—</span></button>
+          <button class="chip" data-filter="new7d">Nové ·7d <span id="inv-c-new7d" class="text-slate-600">·—</span></button>
+          <button class="chip" onclick="exportInventoryCSV()" title="stáhnout inventář jako CSV">⬇ CSV</button>
         </div>
       </div>
+      <input id="inv-search" type="search" oninput="invSearch=this.value.toLowerCase();renderInventory()" placeholder="🔎 hledat jméno / IP / MAC / vendor…" class="w-full mb-2 px-2.5 py-1.5 rounded-lg bg-slate-800/50 border border-slate-700 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-cyan-500" />
       <div class="overflow-auto scrollbar" style="max-height:520px"><table class="w-full compact">
         <thead class="text-[10px] uppercase text-slate-500 border-b border-slate-800 sticky top-0 bg-slate-900"><tr>
           <th class="text-left pl-1 sortable" data-sortkey="online">Stav<span class="sort-arrow"></span></th>
@@ -1009,34 +1054,13 @@
       <div id="services-detail" class="grid grid-cols-1 md:grid-cols-2 gap-3"></div>
     </div>
 
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
-      <div class="card p-4">
-        <h2 class="section-label mb-2">ntfy push notifikace</h2>
-        <div class="space-y-2 text-xs">
-          <div><div class="text-slate-400 mb-1">URL serveru:</div><code class="block px-2 py-1.5 bg-slate-800 rounded font-mono text-emerald-300">http://{{ server_ip }}:8090</code></div>
-          <div><div class="text-slate-400 mb-1">Topic pro alerty:</div><code class="block px-2 py-1.5 bg-slate-800 rounded font-mono">mikrotiktraffic-security</code></div>
-          <div><div class="text-slate-400 mb-1">Topic pro info:</div><code class="block px-2 py-1.5 bg-slate-800 rounded font-mono">mikrotiktraffic-info</code></div>
-          <div class="flex gap-2 mt-3"><a class="flex-1 text-center px-3 py-2 rounded bg-slate-800/60 hover:bg-slate-800 text-slate-200" target="_blank" href="https://play.google.com/store/apps/details?id=io.heckel.ntfy">Android</a><a class="flex-1 text-center px-3 py-2 rounded bg-slate-800/60 hover:bg-slate-800 text-slate-200" target="_blank" href="https://apps.apple.com/us/app/ntfy/id1625396347">iOS</a></div>
-        </div>
-      </div>
-      <div class="card p-4">
-        <h2 class="section-label mb-2">Pravidla notifikací</h2>
-        <div class="space-y-1.5 text-xs">
-          <div class="flex items-start gap-2 p-2 rounded bg-slate-800/30"><span class="text-rose-400 text-lg">🚨</span><div><div class="font-medium text-slate-200">Kritický burst</div><div class="text-[10px] text-slate-500">≥3 IP hitují kritickou signaturu za 10 min</div></div></div>
-          <div class="flex items-start gap-2 p-2 rounded bg-slate-800/30"><span class="text-rose-400 text-lg">🚩</span><div><div class="font-medium text-slate-200">Škodlivá IP útočí</div><div class="text-[10px] text-slate-500">AbuseIPDB ≥80 nebo VT ≥5</div></div></div>
-          <div class="flex items-start gap-2 p-2 rounded bg-slate-800/30"><span class="text-emerald-400 text-lg">📱</span><div><div class="font-medium text-slate-200">Nové zařízení</div><div class="text-[10px] text-slate-500">Nová MAC (info topic, cooldown 24h)</div></div></div>
-          <div class="flex items-start gap-2 p-2 rounded bg-slate-800/30"><span class="text-rose-400 text-lg">❌</span><div><div class="font-medium text-slate-200">Služba spadla</div><div class="text-[10px] text-slate-500">Suricata/ntopng/EveBox/TZSP neaktivní</div></div></div>
-          <div class="flex items-start gap-2 p-2 rounded bg-slate-800/30"><span class="text-amber-400 text-lg">🚧</span><div><div class="font-medium text-slate-200">Firewall drop spike</div><div class="text-[10px] text-slate-500">>100 dropů z jedné IP za 10 min</div></div></div>
-        </div>
-      </div>
-    </div>
 
     <div class="card p-4">
       <h2 class="section-label mb-2">Rychlé odkazy</h2>
       <div class="grid grid-cols-1 md:grid-cols-3 gap-2">
         <a href="http://{{ server_ip }}:{{ ntopng_port }}/" target="_blank" class="flex items-center justify-between px-3 py-2 rounded-lg bg-slate-800/40 hover:bg-slate-800 transition border border-slate-800 group"><div><div class="font-medium text-slate-100 text-xs">ntopng</div><div class="text-[10px] text-slate-500">analyzátor toků · :{{ ntopng_port }}</div></div><span class="text-cyan-300 opacity-0 group-hover:opacity-100 transition text-sm">→</span></a>
         <a href="http://{{ server_ip }}:{{ evebox_port }}/" target="_blank" class="flex items-center justify-between px-3 py-2 rounded-lg bg-slate-800/40 hover:bg-slate-800 transition border border-slate-800 group"><div><div class="font-medium text-slate-100 text-xs">EveBox</div><div class="text-[10px] text-slate-500">prohlížeč alertů · :{{ evebox_port }}</div></div><span class="text-cyan-300 opacity-0 group-hover:opacity-100 transition text-sm">→</span></a>
-        <a href="http://{{ server_ip }}:8090/" target="_blank" class="flex items-center justify-between px-3 py-2 rounded-lg bg-slate-800/40 hover:bg-slate-800 transition border border-slate-800 group"><div><div class="font-medium text-slate-100 text-xs">ntfy</div><div class="text-[10px] text-slate-500">push notifikace · :8090</div></div><span class="text-cyan-300 opacity-0 group-hover:opacity-100 transition text-sm">→</span></a>
+        <a href="/?kiosk=1" target="_blank" class="flex items-center justify-between px-3 py-2 rounded-lg bg-slate-800/40 hover:bg-slate-800 transition border border-slate-800 group"><div><div class="font-medium text-slate-100 text-xs">🖥️ SOC wall</div><div class="text-[10px] text-slate-500">kiosk na monitor/TV · rotace tabů à 25 s</div></div><span class="text-cyan-300 opacity-0 group-hover:opacity-100 transition text-sm">→</span></a>
       </div>
       <div class="text-[10px] mt-3 pt-3 border-t border-slate-800 text-slate-500 grid grid-cols-2 md:grid-cols-4 gap-2">
         <div><span>Redis</span><div id="info-redis" class="text-slate-300 font-mono">—</div></div>
@@ -1044,6 +1068,27 @@
         <div><span>Boot</span><div id="info-boot" class="text-slate-300 font-mono">—</div></div>
         <div><span>eve.json</span><div id="disk-eve" class="text-slate-300 font-mono">—</div></div>
       </div>
+    </div>
+
+    <div class="card p-4">
+      <h2 class="section-label mb-2">Růst dat · 30 dní
+        <span class="tip" data-tip="Denní snapshoty velikosti store.db, WAL, eve.json a zaplnění disku — kapacitní problém uvidíš týdny dopředu. db/WAL se sbírá od 2026-06-11, eve.json historicky.">ⓘ</span>
+      </h2>
+      <div class="grid grid-cols-2 md:grid-cols-5 gap-2 text-[10px] text-slate-500 mb-2" id="cap-now">—</div>
+      <div class="h-36"><canvas id="chart-capacity"></canvas></div>
+    </div>
+
+    <div class="card p-4">
+      <h2 class="section-label mb-2">📚 Historie po měsících
+        <span class="tip" data-tip="Měsíční agregáty se ukládají natrvalo (přežijí 30denní retenci detailů) — roční trendy, 'letos vs loni'. Plní je hodinová údržba.">ⓘ</span>
+      </h2>
+      <div class="overflow-auto scrollbar"><table class="w-full compact">
+        <thead class="text-[10px] uppercase text-slate-500 border-b border-slate-800"><tr>
+          <th class="text-left pl-1">Měsíc</th><th class="text-right">Alerty</th><th class="text-right">FW dropy</th>
+          <th class="text-right">Útočníci</th><th class="text-right">DNS dotazy</th><th class="text-right">WAN ↓</th><th class="text-right pr-1">Anomálie</th>
+        </tr></thead>
+        <tbody id="monthly-table" class="divide-y divide-slate-800/60"></tbody>
+      </table></div>
     </div>
   </div>
 </div>
@@ -1086,6 +1131,32 @@
 </div>
 
 <!-- Big "all attackers" view — who attacks me and from where -->
+<div id="ai-modal" class="modal-bg">
+  <div class="card p-5 w-full max-w-xl mx-4" onclick="event.stopPropagation()">
+    <div class="flex items-center justify-between mb-2">
+      <div class="min-w-0"><div class="text-base font-semibold text-slate-100">🧠 AI vysvětlení signatury</div><div class="text-[10px] text-slate-500 font-mono truncate" id="ai-sig">—</div></div>
+      <button class="text-slate-400 hover:text-slate-100 text-xl shrink-0" onclick="document.getElementById('ai-modal').classList.remove('show')">✕</button>
+    </div>
+    <div id="ai-body" class="text-xs text-slate-300 leading-relaxed whitespace-pre-wrap">—</div>
+    <div class="text-[9px] text-slate-600 mt-2" id="ai-foot"></div>
+  </div>
+</div>
+
+<div id="devhist-modal" class="modal-bg">
+  <div class="card p-5 w-full max-w-2xl mx-4" onclick="event.stopPropagation()">
+    <div class="flex items-center justify-between mb-3">
+      <div>
+        <div class="text-base font-semibold text-slate-100" id="devhist-title">—</div>
+        <div class="text-xs text-slate-500" id="devhist-sub">—</div>
+      </div>
+      <button class="text-slate-400 hover:text-slate-100 text-xl" onclick="document.getElementById('devhist-modal').classList.remove('show')">✕</button>
+    </div>
+    <div class="h-56"><canvas id="chart-devhist"></canvas></div>
+    <div id="devhist-dns" class="mt-3 max-h-44 overflow-auto scrollbar"></div>
+    <div class="text-[10px] text-slate-500 mt-2">zelená ↓ download · modrá ↑ upload · NetFlow buckety (hodina / den dle období)</div>
+  </div>
+</div>
+
 <div id="allatk-modal" class="modal-bg">
   <div class="modal p-5 space-y-3" style="max-width: 1100px" onclick="event.stopPropagation()">
     <div class="flex items-center justify-between">
@@ -1099,6 +1170,7 @@
           <button class="chip" data-h="168">7d</button>
           <button class="chip" data-h="720">30d</button>
         </div>
+        <button class="chip" onclick="exportAttackersCSV()" title="stáhnout seznam útočníků jako CSV">⬇ CSV</button>
         <button class="text-slate-400 hover:text-slate-100 text-xl" onclick="document.getElementById('allatk-modal').classList.remove('show')">✕</button>
       </div>
     </div>
@@ -1138,8 +1210,10 @@ const $ = (id) => document.getElementById(id);
 // DHCP hostnames, UniFi names, AdGuard domains, VT/Abuse ISP strings.
 const ESC_MAP = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
 const esc = s => (s == null ? "" : String(s).replace(/[&<>"']/g, c => ESC_MAP[c]));
+const SRV = "{{ server_ip }}", EVEBOX_PORT_JS = {{ evebox_port }};
 const fmtBytes = n => n < 1024 ? n+" B" : n < 1024**2 ? (n/1024).toFixed(1)+" KB" : n < 1024**3 ? (n/1024**2).toFixed(1)+" MB" : (n/1024**3).toFixed(2)+" GB";
 const fmtNum = n => (typeof n === "number" ? n : 0).toLocaleString("cs-CZ");
+const fmtBps = n => !n || n < 1000 ? Math.round(n || 0) + " b/s" : n < 1e6 ? (n/1e3).toFixed(0)+" kb/s" : n < 1e9 ? (n/1e6).toFixed(1)+" Mb/s" : (n/1e9).toFixed(2)+" Gb/s";
 const sevColor = s => ({1:"text-rose-400",2:"text-amber-400",3:"text-sky-400"}[s] || "text-slate-400");
 const sevDot = s => ({1:"bg-rose-500",2:"bg-amber-500",3:"bg-sky-500"}[s] || "bg-slate-500");
 
@@ -1154,7 +1228,7 @@ document.querySelectorAll(".tab").forEach(t => {
   });
 });
 
-let invFilter = "online", invDevices = [];
+let invFilter = "online", invDevices = [], invSearch = "";
 let invSortKey = "hostname", invSortDir = "asc";
 document.querySelectorAll(".chip[data-filter]").forEach(c => {
   c.addEventListener("click", () => {
@@ -1261,7 +1335,31 @@ async function showIntel(ip) {
     if (vt) { const bad = vt.malicious || 0, col = bad >= 5 ? 'text-rose-300' : bad > 0 ? 'text-amber-300' : 'text-emerald-300'; html += `<div class="p-3 rounded bg-slate-800/50"><div class="section-label mb-1">VirusTotal</div><div class="flex items-baseline gap-2"><span class="text-2xl font-mono ${col}">${bad}</span><span class="text-xs text-slate-400">malicious</span></div><div class="text-[10px] text-slate-500 mt-0.5">${esc(vt.country||'?')} · ${esc(vt.as_owner||'')}</div></div>`; }
     if (ab) { const sc = ab.score || 0, col = sc >= 80 ? 'text-rose-300' : sc >= 50 ? 'text-amber-300' : sc > 0 ? 'text-sky-300' : 'text-emerald-300'; html += `<div class="p-3 rounded bg-slate-800/50"><div class="section-label mb-1">AbuseIPDB</div><div class="flex items-baseline gap-2"><span class="text-2xl font-mono ${col}">${sc}<span class="text-sm text-slate-500">/100</span></span><span class="text-xs text-slate-400">${ab.reports||0} reportů</span></div><div class="text-[10px] text-slate-500 mt-0.5">${esc(ab.country||'?')} · ${esc(ab.isp||'')}</div></div>`; }
     html += `<div class="flex justify-between text-[10px] text-slate-500 pt-2 border-t border-slate-800"><span>${r.cached ? 'z cache' : 'live lookup'}</span><span>${r.fetched_at ? new Date(r.fetched_at*1000).toLocaleString('cs-CZ') : ''}</span></div>`;
+    if (!/^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|127\.)/.test(ip)) {
+      const cmd = `/ip firewall address-list add list=blocklist address=${ip} timeout=30d comment="netwatch"`;
+      html += `<div class="pt-2 mt-1 border-t border-slate-800 space-y-1.5">
+        <div class="section-label">Co s tím</div>
+        <div class="flex items-center gap-1.5">
+          <code id="intel-cmd" class="flex-1 text-[10px] bg-slate-900/70 rounded px-2 py-1.5 text-emerald-300 font-mono truncate" title="${cmd}">${cmd}</code>
+          <button onclick="navigator.clipboard.writeText(this.previousElementSibling.title);this.textContent='✓ zkopírováno'" class="chip text-[10px] shrink-0">kopírovat na MikroTik</button>
+        </div>
+        <div class="flex items-center gap-3 text-[10px] pt-0.5">
+          <a href="http://${SRV}:${EVEBOX_PORT_JS}/#/events?q=${ip}" target="_blank" class="text-cyan-300 hover:underline">EveBox alerty →</a>
+          <a href="https://www.abuseipdb.com/check/${ip}" target="_blank" class="text-cyan-300 hover:underline">AbuseIPDB →</a>
+          <a href="https://www.virustotal.com/gui/ip-address/${ip}" target="_blank" class="text-cyan-300 hover:underline">VirusTotal →</a>
+        </div>
+      </div>`;
+    }
     $("intel-body").innerHTML = html;
+    fetch(`/api/ip-timeline?ip=${ip}&hours=48`).then(x => x.json()).then(tl => {
+      const bx = tl.buckets || [];
+      const maxv = Math.max(...bx.map(b => b.alerts + b.drops), 1);
+      const el = document.createElement("div");
+      el.innerHTML = `<div class="section-label mb-1 mt-1">Časová osa · 48 h <span class="text-slate-600 font-normal">(červená = IDS alert, oranžová = firewall drop)</span></div>
+        <div class="flex items-end gap-px h-10 bg-slate-900/40 rounded p-1">${bx.length ? bx.map(b => `<div title="${new Date(b.ts*1000).toLocaleString('cs-CZ')} · ${b.alerts} alertů · ${b.drops} dropů" class="flex-1 rounded-t ${b.alerts ? 'bg-rose-400/80' : 'bg-amber-400/60'}" style="height:${Math.max(10, (b.alerts + b.drops) * 100 / maxv)}%"></div>`).join("") : '<span class="text-[10px] text-slate-500 px-2">žádné události za 48 h</span>'}</div>
+        ${(tl.last_alerts || []).slice(0, 5).map(a => `<div class="text-[10px] text-slate-500 truncate mt-0.5">${new Date(a.ts*1000).toLocaleString('cs-CZ')} · ${esc(a.signature || '?')}</div>`).join("")}`;
+      $("intel-body").appendChild(el);
+    }).catch(() => {});
   } catch (e) { $("intel-body").innerHTML = `<div class="text-rose-400 text-xs">Chyba: ${e.message}</div>`; }
 }
 $("intel-modal").addEventListener("click", e => { if (e.target.id === "intel-modal") e.currentTarget.classList.remove("show"); });
@@ -1343,7 +1441,7 @@ async function showAllAttackers() {
     allatkData = r.attackers || [];
     const wlabel = allatkHours === 24 ? "24h" : allatkHours === 168 ? "7 dní" : "30 dní";
     $("allatk-window").textContent = wlabel;
-    $("allatk-sub").textContent = `${r.total_ips} unikátních IP · ${fmtNum(r.total_hits)} zásahů (${fmtNum(r.ids_total)} IDS + ${fmtNum(r.fw_total)} firewall)`;
+    $("allatk-sub").textContent = `${fmtNum(r.total_ips)} unikátních IP · ${fmtNum(r.total_hits)} zásahů (${fmtNum(r.ids_total)} IDS + ${fmtNum(r.fw_total)} firewall) · top ${(r.attackers || []).length} v seznamu`;
     const maxc = (r.top_countries[0]||{count:1}).count;
     $("allatk-countries").innerHTML = (r.top_countries||[]).map(c =>
       `<span class="pill pill-neutral" style="font-size:11px"><span class="mr-1">${c.flag}</span>${c.code} <span class="text-slate-500 ml-1">${c.count}</span></span>`
@@ -1376,6 +1474,15 @@ function renderHealth(h) {
   $("health-emoji").textContent = {ok:"🟢", warn:"🟡", bad:"🔴"}[s.level] || "⏳";
   $("health-headline").textContent = s.headline;
   $("health-sub").textContent = s.sub;
+  if (s.score != null) {
+    const ring = $("health-score-ring");
+    if (ring) {
+      ring.classList.remove("hidden");
+      ring.style.setProperty("--p", s.score);
+      ring.style.setProperty("--ring-c", s.score >= 90 ? "#34d399" : s.score >= 70 ? "#fbbf24" : "#fb7185");
+      $("health-score").textContent = s.score;
+    }
+  }
   $("health-issues").innerHTML = s.issues.length
     ? s.issues.map(i => `<div class="issue-chip issue-chip-${i.level}" onclick='issueClick("${i.level}", ${JSON.stringify(i.text)})'>
         <div class="flex items-center gap-2"><span class="text-base">${i.icon}</span><span class="text-xs font-medium text-slate-100">${i.text}</span><span class="text-[10px] text-slate-500 ml-1">→</span></div>
@@ -1470,13 +1577,17 @@ function renderInventory() {
   const totalCount = invDevices.length;
   const onlineCount = invDevices.filter(d => d.online).length;
   const infraCount = invDevices.filter(d => d.kind === "infra").length;
+  const new7dCount = invDevices.filter(d => d.first_seen && d.first_seen > Date.now()/1000 - 7*86400).length;
   $("inv-c-online").textContent = "· " + onlineCount;
   $("inv-c-infra").textContent = "· " + infraCount;
   $("inv-c-all").textContent = "· " + totalCount;
+  if ($("inv-c-new7d")) $("inv-c-new7d").textContent = "· " + new7dCount;
 
   let list = invDevices.slice();
   if (invFilter === "online") list = list.filter(d => d.online);
   else if (invFilter === "infra") list = list.filter(d => d.kind === "infra");
+  else if (invFilter === "new7d") list = list.filter(d => d.first_seen && d.first_seen > Date.now()/1000 - 7*86400);
+  if (invSearch) list = list.filter(d => (friendlyName(d) + " " + (d.ip||"") + " " + (d.mac||"") + " " + (d.vendor||"")).toLowerCase().includes(invSearch));
 
   // Audit P0 #7: sort
   const dir = invSortDir === "asc" ? 1 : -1;
@@ -1500,10 +1611,12 @@ function renderInventory() {
     ? list.map(d => {
         const ip = d.ip || "—";
         const hostname = friendlyName(d);
+        const _new7d = d.first_seen && d.first_seen > Date.now()/1000 - 7*86400;
+        const _newBadge = _new7d ? ` <span class="text-[9px] text-emerald-400 whitespace-nowrap">● ${new Date(d.first_seen*1000).toLocaleDateString('cs-CZ',{day:'2-digit',month:'2-digit'})}</span>` : '';
         const uplink = d.uplink ? d.uplink : (d.kind === "infra" ? "(infra)" : "—");
         let type = d.kind === "infra" ? `<span class="pill pill-info">${esc(d.infra_model||'infra')}</span>` : d.client_type === "WIRELESS" ? '<span class="pill pill-neutral">📶 WiFi</span>' : d.client_type === "WIRED" ? '<span class="pill pill-neutral">🔌 drát</span>' : '<span class="pill pill-neutral">—</span>';
         const ipCell = d.ip ? `<span data-ip="${d.ip}" class="ip-link">${d.ip}</span>` : "—";
-        return `<tr class="hover:bg-slate-800/30"><td class="pl-1"><span class="dot ${d.online?'dot-ok':'dot-off'}"></span></td><td class="text-[11px] text-slate-200 truncate max-w-[200px]" title="${esc(hostname)}">${esc(hostname)}</td><td class="text-[11px] font-mono text-slate-300">${ipCell}</td><td class="text-[10px] font-mono text-slate-500">${d.mac}</td><td class="text-[10px] text-slate-400">${esc(d.vendor || '—')}</td><td class="text-[10px] text-slate-400 truncate max-w-[160px]" title="${esc(uplink)}">${esc(uplink)}</td><td>${type}</td></tr>`;
+        return `<tr class="hover:bg-slate-800/30"><td class="pl-1"><span class="dot ${d.online?'dot-ok':'dot-off'}"></span></td><td class="text-[11px] text-slate-200 truncate max-w-[200px]" title="${esc(hostname)}">${esc(hostname)}${_newBadge}</td><td class="text-[11px] font-mono text-slate-300">${ipCell}</td><td class="text-[10px] font-mono text-slate-500">${d.mac}</td><td class="text-[10px] text-slate-400">${esc(d.vendor || '—')}</td><td class="text-[10px] text-slate-400 truncate max-w-[160px]" title="${esc(uplink)}">${esc(uplink)}</td><td>${type}</td></tr>`;
       }).join("")
     : '<tr><td colspan="7" class="text-slate-500 text-center py-4 text-[11px]">žádná zařízení</td></tr>';
 }
@@ -1552,7 +1665,7 @@ function renderOverview(d) {
       <div class="text-[11px] text-slate-400 leading-relaxed">${s.description}</div>
       <div class="text-[10px] text-slate-500 mt-2 flex items-center gap-3">
         <span>uptime: <span class="font-mono text-slate-300">${s.uptime_str||'?'}</span></span>${s.cpu_pct!=null ? `<span>CPU: <span class="font-mono text-slate-300">${s.cpu_pct}%</span></span>` : ''}${s.mem_mb!=null ? `<span>RAM: <span class="font-mono text-slate-300">${s.mem_mb} MB</span></span>` : ''}
-      </div></div>`;
+      </div>${!ok ? `<div class="text-[10px] mt-2 pt-2 border-t border-slate-800 font-mono"><span class="text-amber-300">sudo systemctl restart ${s.unit}</span> · <span class="text-slate-400">journalctl -u ${s.unit} -n 50</span></div>` : ''}</div>`;
   }).join("");
 
 }
@@ -1594,7 +1707,7 @@ function renderSecurityAlerts(d) {
 
   const maxSig = (d.alerts.top_signatures[0]||{count:1}).count;
   $("top-sigs").innerHTML = d.alerts.top_signatures.length
-    ? d.alerts.top_signatures.map(s => `<tr class="hover:bg-slate-800/30"><td class="pl-1"><div class="text-[11px] text-slate-300 truncate max-w-[280px]" title="${esc(s.signature)}">${esc(s.signature)}</div><div class="h-0.5 bg-slate-800 rounded mt-0.5"><div class="h-full bg-gradient-to-r from-rose-500 to-amber-500 rounded" style="width:${(s.count/maxSig*100).toFixed(1)}%"></div></div></td><td class="pr-1 text-right font-mono text-slate-300">${s.count}</td></tr>`).join("")
+    ? d.alerts.top_signatures.map(s => `<tr class="hover:bg-slate-800/30 cursor-pointer" data-sig="${esc(s.signature)}" onclick="showAiExplain(this.dataset.sig)" title="klik = 🧠 AI vysvětlení signatury"><td class="pl-1"><div class="text-[11px] text-slate-300 truncate max-w-[280px]">🧠 ${esc(s.signature)}</div><div class="h-0.5 bg-slate-800 rounded mt-0.5"><div class="h-full bg-gradient-to-r from-rose-500 to-amber-500 rounded" style="width:${(s.count/maxSig*100).toFixed(1)}%"></div></div></td><td class="pr-1 text-right font-mono text-slate-300">${s.count}</td></tr>`).join("")
     : '<tr><td colspan="2" class="text-slate-500 text-center py-3 text-[11px]">žádné alerty</td></tr>';
 }
 
@@ -1676,6 +1789,28 @@ function renderFirewallRules(d) {
 // === Audit P1 #4: AdGuard Live DNS stream ===
 let dnsFilter = "all";
 let cachedDnsRecent = [];
+let dnsSearchResults = null, dnsQuickFilter = "";
+// psaní = okamžitý filtr cached streamu; Enter = hledání v AdGuard historii (server)
+document.addEventListener("DOMContentLoaded", () => {
+  const inp = document.getElementById("dns-search");
+  if (!inp) return;
+  inp.addEventListener("input", e => {
+    dnsQuickFilter = e.target.value.trim().toLowerCase();
+    if (!dnsQuickFilter) dnsSearchResults = null;
+    renderDnsStream();
+  });
+  inp.addEventListener("keydown", async e => {
+    if (e.key !== "Enter") return;
+    const q = e.target.value.trim();
+    if (!q) { dnsSearchResults = null; renderDnsStream(); return; }
+    $("dns-stream-meta").textContent = "hledám v historii…";
+    try {
+      const d = await fetch(`/api/dns-search?q=${encodeURIComponent(q)}`).then(r => r.json());
+      dnsSearchResults = d.results || [];
+    } catch { dnsSearchResults = []; }
+    renderDnsStream();
+  });
+});
 document.querySelectorAll(".chip[data-dnsfilter]").forEach(c => {
   c.addEventListener("click", () => {
     document.querySelectorAll(".chip[data-dnsfilter]").forEach(x => x.classList.remove("active"));
@@ -1685,10 +1820,16 @@ document.querySelectorAll(".chip[data-dnsfilter]").forEach(c => {
   });
 });
 function renderDnsStream() {
-  let list = cachedDnsRecent.slice();
+  let list = (dnsSearchResults !== null ? dnsSearchResults : cachedDnsRecent).slice();
   if (dnsFilter === "blocked") list = list.filter(q => q.blocked);
   else if (dnsFilter === "allowed") list = list.filter(q => !q.blocked);
-  $("dns-stream-meta").textContent = `${list.length} / ${cachedDnsRecent.length} dotazů`;
+  if (dnsQuickFilter && dnsSearchResults === null)
+    list = list.filter(q => (((q.question && q.question.name) || "").toLowerCase().includes(dnsQuickFilter)
+      || (q.client || "").includes(dnsQuickFilter)
+      || (q.client_hostname || "").toLowerCase().includes(dnsQuickFilter)));
+  $("dns-stream-meta").textContent = dnsSearchResults !== null
+    ? `${list.length} výsledků · historie AdGuard`
+    : `${list.length} / ${cachedDnsRecent.length} dotazů`;
   $("dns-stream").innerHTML = list.length
     ? list.map(q => {
         const client = q.client_hostname ? `${esc(q.client_hostname)}<span class="text-slate-600 font-mono ml-1 text-[9px]">${esc(q.client||'')}</span>` : `<span class="font-mono">${esc(q.client||'?')}</span>`;
@@ -1714,6 +1855,7 @@ function renderNetwork(d) {
   $("kpi-wifi").textContent = s.wifi || 0;
   $("kpi-wired").textContent = s.wired || 0;
   $("kpi-infra").textContent = `${s.infra_online||0}/${s.infra||0}`;
+  if ($("kpi-other")) $("kpi-other").textContent = Math.max(0, (s.online||0) - (s.wifi||0) - (s.wired||0) - (s.infra_online||0));
   $("tab-badge-dev").textContent = s.online ? `(${s.online})` : '';
 
   const m = d.mikrotik || {};
@@ -1781,8 +1923,9 @@ function renderNetwork(d) {
 }
 
 function renderWiFi(d) {
+  updRetrRates(d.aps);
   $("wifi-per-ap").innerHTML = (d.aps || []).length
-    ? d.aps.map(ap => `<div class="border border-slate-800 rounded-lg p-3 bg-slate-800/20"><div class="flex items-center justify-between mb-2"><div><span class="font-medium text-slate-100">${esc(ap.ap_name)}</span><span class="ml-1 text-[10px] text-slate-500">${esc(ap.ap_model||'')}</span></div><div class="text-[10px] text-slate-500">${ap.client_count} klientů · avg signál ${ap.avg_signal||'?'} dBm</div></div><div class="overflow-x-auto scrollbar"><table class="w-full compact"><thead class="text-[10px] uppercase text-slate-500 border-b border-slate-800/60"><tr><th class="text-left pl-1">Klient</th><th class="text-left">IP</th><th class="text-left">Radio</th><th class="text-left">Signál</th><th class="text-right">TX/RX kbps</th><th class="text-right pr-1">Retries</th></tr></thead><tbody class="divide-y divide-slate-800/40 text-xs">${ap.clients.map(c => `<tr><td class="pl-1 truncate max-w-[180px]" title="${esc(c.hostname)}">${esc((c.hostname||'?').slice(0,22))}</td><td class="font-mono text-[10px] text-slate-400">${c.ip||'—'}</td><td class="text-[10px] text-slate-400">${esc(c.radio||'?')} ch${c.channel||'?'}</td><td><div class="flex items-center gap-1.5"><span class="text-[10px] font-mono ${c.signal>=-55?'text-emerald-300':c.signal>=-65?'text-cyan-300':c.signal>=-75?'text-amber-300':'text-rose-300'}">${c.signal||'?'}</span><div class="w-12 h-1 bg-slate-800 rounded"><div class="h-1.5 rounded ${signalClass(c.signal)}" style="width:${signalPct(c.signal)}%"></div></div></div></td><td class="text-right font-mono text-[10px] text-slate-400">${c.tx_rate_kbps||0}/${c.rx_rate_kbps||0}</td><td class="pr-1 text-right font-mono text-[10px] ${c.tx_retries>1000?'text-amber-300':'text-slate-500'}">${fmtNum(c.tx_retries||0)}</td></tr>`).join("")}</tbody></table></div></div>`).join("")
+    ? d.aps.map(ap => `<div class="border border-slate-800 rounded-lg p-3 bg-slate-800/20"><div class="flex items-center justify-between mb-2"><div><span class="font-medium text-slate-100">${esc(ap.ap_name)}</span><span class="ml-1 text-[10px] text-slate-500">${esc(ap.ap_model||'')}</span></div><div class="text-[10px] text-slate-500">${ap.client_count} klientů · avg signál ${ap.avg_signal||'?'} dBm</div></div><div class="overflow-x-auto scrollbar"><table class="w-full compact"><thead class="text-[10px] uppercase text-slate-500 border-b border-slate-800/60"><tr><th class="text-left pl-1">Klient</th><th class="text-left">IP</th><th class="text-left">Radio</th><th class="text-left">Signál</th><th class="text-right">TX/RX kbps</th><th class="text-right pr-1">Retries</th></tr></thead><tbody class="divide-y divide-slate-800/40 text-xs">${ap.clients.map(c => `<tr><td class="pl-1 truncate max-w-[180px]" title="${esc(c.hostname)}">${esc((c.hostname||'?').slice(0,22))}</td><td class="font-mono text-[10px] text-slate-400">${c.ip||'—'}</td><td class="text-[10px] text-slate-400">${esc(c.radio||'?')} ch${c.channel||'?'}</td><td><div class="flex items-center gap-1.5"><span class="text-[10px] font-mono ${c.signal>=-55?'text-emerald-300':c.signal>=-65?'text-cyan-300':c.signal>=-75?'text-amber-300':'text-rose-300'}">${c.signal||'?'}</span><div class="w-12 h-1 bg-slate-800 rounded"><div class="h-1.5 rounded ${signalClass(c.signal)}" style="width:${signalPct(c.signal)}%"></div></div></div></td><td class="text-right font-mono text-[10px] text-slate-400">${c.tx_rate_kbps||0}/${c.rx_rate_kbps||0}</td><td class="pr-1 text-right font-mono text-[10px] ${retrClass(c.mac)}" title="${retrTitle(c.mac)}">${fmtNum(c.tx_retries||0)}</td></tr>`).join("")}</tbody></table></div></div>`).join("")
     : '<div class="text-slate-500 text-xs">žádná data</div>';
 
   $("wired-per-sw").innerHTML = (d.switches || []).length
@@ -1796,7 +1939,7 @@ function renderWiFi(d) {
 
 function renderFirewall(d) {
   $("fw-top").innerHTML = (d.top || []).length
-    ? d.top.map(r => { const threat = (r.abuse_score >= 50 || r.vt_malicious >= 3) ? `<span class="pill pill-bad">⚠ ${r.abuse_score||0}/${r.vt_malicious||0}</span>` : (r.abuse_score != null) ? `<span class="text-[10px] text-slate-500">${r.abuse_score}/${r.vt_malicious||0}</span>` : '<span class="text-[10px] text-slate-600">—</span>'; return `<tr class="hover:bg-slate-800/30"><td class="pl-1 font-mono text-[11px]"><span class="ip-link" onclick="showIntel('${r.src_ip}')">${r.src_ip}</span></td><td class="text-[11px]"><span class="mr-1">${r.flag||'🌐'}</span>${esc((r.country||'').slice(0,14))}</td><td>${threat}</td><td class="pr-1 text-right font-mono text-slate-300">${r.hits}</td></tr>`; }).join("")
+    ? d.top.map(r => { const threat = (r.abuse_score >= 50 || r.vt_malicious >= 2) ? `<span class="pill pill-bad">⚠ ${r.abuse_score||0}/${r.vt_malicious||0}</span>` : (r.abuse_score != null) ? `<span class="text-[10px] text-slate-500">${r.abuse_score}/${r.vt_malicious||0}</span>` : '<span class="text-[10px] text-slate-600">—</span>'; return `<tr class="hover:bg-slate-800/30"><td class="pl-1 font-mono text-[11px]"><span class="ip-link" onclick="showIntel('${r.src_ip}')">${r.src_ip}</span></td><td class="text-[11px]"><span class="mr-1">${r.flag||'🌐'}</span>${esc((r.country||'').slice(0,14))}</td><td>${threat}</td><td class="pr-1 text-right font-mono text-slate-300">${r.hits}</td></tr>`; }).join("")
     : '<tr><td colspan="4" class="text-slate-500 text-center py-3 text-[11px]">žádné dropy zaznamenány</td></tr>';
   $("fw-recent").innerHTML = (d.recent || []).length
     ? d.recent.map(r => { const t = r.ts ? new Date(r.ts*1000).toLocaleTimeString('cs-CZ') : '—'; return `<tr class="hover:bg-slate-800/30"><td class="pl-1 font-mono text-[10px] text-slate-400">${t}</td><td class="text-[10px] text-slate-300">${r.chain||'—'}</td><td class="font-mono text-[10px]"><span class="ip-link" onclick="showIntel('${r.src_ip}')">${r.src_ip||'?'}</span><span class="text-slate-600">:${r.src_port||''}</span></td><td class="font-mono text-[10px] text-slate-500">${r.dst_ip||'?'}:${r.dst_port||''}</td><td class="text-[10px] text-slate-400">${r.proto||'?'}</td></tr>`; }).join("")
@@ -1809,10 +1952,9 @@ function renderDNS(d) {
   cachedDnsRecent = d.recent_queries || [];
   renderDnsStream();
   const m = d.merged;
-  $("dns-kpi-q").textContent = fmtNum(m.queries_24h);
+  // KPI dotazy/blokováno/rate plní VÝHRADNĚ refreshDnsHistory (dle zvolené periody);
+  // zápis tady by je přepsal 24h hodnotou → blikající race (audit).
   $("dns-kpi-instances").textContent = `${m.instances_running}/${m.instances_total}`;
-  $("dns-kpi-blocked").textContent = fmtNum(m.blocked_24h);
-  $("dns-kpi-rate").textContent = m.block_rate_pct;
   $("dns-kpi-safe").textContent = fmtNum(m.safesearch_24h + m.safebrowsing_24h + m.parental_24h);
   $("dns-kpi-time").textContent = (m.avg_processing_s * 1000).toFixed(1);
 
@@ -1891,7 +2033,7 @@ function showTopoDetail(d) {
               <div class="min-w-0 flex-1 truncate" title="${esc(name)}"><span class="text-slate-100">${esc(name.slice(0,28))}</span> <span class="font-mono text-slate-500 ml-1">${c.ip || ''}</span></div>
               <div class="text-[10px] text-slate-500 font-mono">${esc(c.radio || '')} ch${c.channel || '?'}</div>
               <div class="flex items-center gap-1.5 w-24"><span class="font-mono ${sigCol} text-[10px]">${sig||'?'}dBm</span><div class="flex-1 h-1 bg-slate-800 rounded"><div class="h-full rounded ${barCol}" style="width:${pct}%"></div></div></div>
-              <div class="text-[10px] font-mono w-14 text-right ${c.tx_retries>1000?'text-amber-300':'text-slate-500'}" title="TX retries">${fmtNum(c.tx_retries||0)}</div>
+              <div class="text-[10px] font-mono w-14 text-right ${retrClass(c.mac)}" title="${retrTitle(c.mac)}">${fmtNum(c.tx_retries||0)}</div>
             </div>`;
           }).join("")}
         </div>
@@ -2236,7 +2378,7 @@ async function renderGlobe(points) {
     });
   }
 
-  $("globe-count").textContent = `${points.length} útočníků`;
+  $("globe-count").textContent = `top ${points.length} útočníků`;
 }
 
 let globePoints = [];
@@ -2334,6 +2476,7 @@ async function refreshTraffic() {
     renderWanLan(summary);
     if (currentPeriod !== "boot") renderWanLanHistory(history);
     fetch(`/api/device-inet?hours=${TRAFFIC_HOURS[currentPeriod] || 24}`).then(r => r.json()).then(renderDeviceInet).catch(() => {});
+    fetch("/api/device-inet-live").then(r => r.json()).then(renderDeviceInetLive).catch(() => {});
   } catch (e) { console.error("traffic refresh failed:", e); }
 }
 
@@ -2368,11 +2511,116 @@ function renderOutcome(d) {
     : "";
 }
 
+// === ŽIVĚ: kdo jede po internetu právě teď (klouzavé ~1-2 min okno z NetFlow) ===
+function renderDeviceInetLive(d) {
+  const box = document.getElementById("dev-inet-live");
+  if (!box) return;
+  box.classList.remove("hidden");
+  const winMin = Math.max(1, Math.round((d.window_s || 60) / 60));
+  $("dil-window").textContent = `· Ø ~${winMin} min`;
+  // NetFlow ticho > 3 min → přiznat, ne ukazovat nuly jako pravdu (ADR 0003)
+  if (d.flow_age_s == null || d.flow_age_s > 180) {
+    $("dil-total").textContent = "NetFlow bez dat " + (d.flow_age_s != null ? d.flow_age_s + " s" : "");
+    $("dil-list").innerHTML = '<div class="text-[10px] text-amber-400/80 text-center py-1">⚠ kolektor nedostává flow záznamy z routeru</div>';
+    return;
+  }
+  const devs = (d.devices || []).filter(x => (x.down_bps + x.up_bps) >= 2000); // < 2 kb/s = šum (keepalive)
+  $("dil-total").textContent = `↓ ${fmtBps(d.total_down_bps)} · ↑ ${fmtBps(d.total_up_bps)} · ${devs.length}/${d.active_count} aktivních`;
+  const list = $("dil-list");
+  if (!devs.length) {
+    list.innerHTML = '<div class="text-[10px] text-slate-500 text-center py-1">žádný výrazný přenos (vše < 2 kb/s)</div>';
+    return;
+  }
+  const max = Math.max(...devs.map(x => x.down_bps + x.up_bps), 1);
+  list.innerHTML = devs.slice(0, 8).map(dv => {
+    const tot = dv.down_bps + dv.up_bps;
+    const w = Math.max(2, Math.round(tot * 100 / max));
+    const downPct = tot ? Math.round(dv.down_bps * 100 / tot) : 50;
+    return `<div class="flex items-center gap-2 cursor-pointer hover:bg-slate-800/40 rounded px-0.5" data-name="${esc(dv.name || dv.ip)}" onclick="showDevHistory('${dv.ip}', this.dataset.name)">
+      <div class="w-32 truncate text-[10px] text-slate-200" title="${esc(dv.name || "")} ${dv.ip}">${esc(dv.name || dv.ip)}</div>
+      <div class="flex-1 h-1.5 rounded bg-slate-700/40 overflow-hidden flex" style="min-width:40px">
+        <div class="h-full bg-emerald-500/90" style="width:${Math.round(w * downPct / 100)}%"></div>
+        <div class="h-full bg-cyan-500/90" style="width:${Math.round(w * (100 - downPct) / 100)}%"></div>
+      </div>
+      <div class="w-36 text-right font-mono text-[10px] text-slate-400 whitespace-nowrap">↓ ${fmtBps(dv.down_bps)} · ↑ ${fmtBps(dv.up_bps)}</div>
+    </div>`;
+  }).join("");
+}
+
+// Per-device historie (audit UX: „kdo žral včera večer")
+let devHistChart = null;
+async function showDevHistory(ip, name) {
+  if (!ip) return;
+  const modal = $("devhist-modal");
+  $("devhist-title").textContent = name || ip;
+  const h = TRAFFIC_HOURS[currentPeriod] || 24;
+  $("devhist-sub").textContent = `internet · ${PERIOD_LABELS[currentPeriod] || "24h"} · ${ip}`;
+  modal.classList.add("show");
+  try {
+    const d = await fetch(`/api/device-inet-history?ip=${ip}&hours=${h}`).then(r => r.json());
+    if (!devHistChart) devHistChart = makeHistChart("chart-devhist", "rgba(6,182,212,0.7)");
+    const lblPeriod = h <= 6 ? "1h" : h <= 48 ? "24h" : "30d";
+    devHistChart.data.labels = (d.buckets || []).map(b => fmtBucketLabel(b.ts, lblPeriod));
+    devHistChart.data.datasets[0].data = (d.buckets || []).map(b => b.down);
+    devHistChart.data.datasets[1].data = (d.buckets || []).map(b => b.up);
+    devHistChart.update("none");
+    $("devhist-dns").innerHTML = '<div class="text-[10px] text-slate-500">načítám DNS profil…</div>';
+    fetch(`/api/device-dns?ip=${ip}`).then(r => r.json()).then(dd => {
+      if (!dd.top || !dd.top.length) {
+        $("devhist-dns").innerHTML = '<div class="text-[10px] text-slate-500">DNS profil: žádné dotazy v AdGuard historii (zařízení možná používá jiný DNS)</div>';
+        return;
+      }
+      $("devhist-dns").innerHTML = `<div class="section-label mb-1">🌐 DNS profil · co resolvuje <span class="text-slate-600 font-normal">(${dd.total} dotazů v historii, ${dd.blocked_total} blokováno)</span></div>` +
+        dd.top.slice(0, 12).map(x => `<div class="flex items-center justify-between text-[11px] py-0.5"><span class="truncate max-w-[75%] ${x.blocked ? 'text-rose-300' : 'text-slate-300'}" title="${esc(x.domain)}">${x.blocked ? '🔴 ' : ''}${esc(x.domain)}</span><span class="font-mono text-slate-500">${x.count}×</span></div>`).join("");
+    }).catch(() => {});
+  } catch (e) { console.error("dev history failed:", e); }
+}
+$("devhist-modal").addEventListener("click", e => { if (e.target.id === "devhist-modal") e.currentTarget.classList.remove("show"); });
+
+// CSV export (client-side; audit UX)
+function dlCSV(filename, rows, headers) {
+  const escCsv = v => { v = v == null ? "" : String(v); return /[";\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+  const lines = [headers.map(h => h[0]).join(";")]
+    .concat(rows.map(r => headers.map(h => escCsv(typeof h[1] === "function" ? h[1](r) : r[h[1]])).join(";")));
+  const blob = new Blob(["\ufeff" + lines.join("\n")], { type: "text/csv;charset=utf-8" });
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = filename; a.click();
+  URL.revokeObjectURL(a.href);
+}
+function exportInventoryCSV() {
+  dlCSV("netwatch-inventar.csv", invDevices, [
+    ["hostname", d => friendlyName(d)], ["ip", "ip"], ["mac", "mac"], ["vendor", "vendor"],
+    ["online", d => d.online ? "ano" : "ne"], ["typ", "client_type"], ["pripojeno_pres", "uplink"],
+    ["prvni_vyskyt", d => d.first_seen ? new Date(d.first_seen * 1000).toLocaleString("cs-CZ") : ""],
+  ]);
+}
+function exportAttackersCSV() {
+  dlCSV("netwatch-utocnici.csv", allatkData, [
+    ["ip", "ip"], ["zeme", "country"], ["mesto", "city"], ["asn_org", "asn_org"],
+    ["ids_hits", "ids_hits"], ["fw_hits", "fw_hits"], ["celkem", "total"],
+    ["abuse_score", "abuse_score"], ["vt_malicious", "vt_malicious"],
+    ["posledni", d => d.last_ts ? new Date(d.last_ts * 1000).toLocaleString("cs-CZ") : ""],
+  ]);
+}
+
+// WiFi retries: kumulativní counter → rychlost za interval (audit: absolutní práh lhal)
+let wifiRetrPrev = {}, wifiRetrRate = {};
+function updRetrRates(aps) {
+  const now = Date.now() / 1000;
+  (aps || []).forEach(ap => (ap.clients || []).forEach(c => {
+    if (!c.mac) return;
+    const cur = c.tx_retries || 0, p = wifiRetrPrev[c.mac];
+    if (p && now - p.t >= 4 && cur >= p.v) wifiRetrRate[c.mac] = (cur - p.v) / (now - p.t);
+    wifiRetrPrev[c.mac] = { v: cur, t: now };
+  }));
+}
+const retrClass = mac => (wifiRetrRate[mac] || 0) > 10 ? "text-rose-300" : (wifiRetrRate[mac] || 0) > 2 ? "text-amber-300" : "text-slate-500";
+const retrTitle = mac => `TX retries (Δ ${(wifiRetrRate[mac] || 0).toFixed(1)}/s)`;
+
 // === REÁLNÝ per-device internet (NetFlow kolektor, ADR 0007) ===
 function renderDeviceInet(d) {
   const devs = d.devices || [], c = d.collector || {};
   const set = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
-  set("dev-inet-meta", `${devs.length} zařízení · ↓ ${fmtBytes(d.total_down || 0)} / ↑ ${fmtBytes(d.total_up || 0)} · NetFlow ${fmtNum(c.packets || 0)} pkt`);
+  set("dev-inet-meta", `top ${devs.length} z ${d.total_devices || devs.length} · ↓ ${fmtBytes(d.total_down || 0)} / ↑ ${fmtBytes(d.total_up || 0)} · NetFlow ${fmtNum(c.packets || 0)} pkt`);
   const el = document.getElementById("dev-inet-list");
   if (!el) return;
   if (!devs.length) {
@@ -2382,7 +2630,7 @@ function renderDeviceInet(d) {
   el.innerHTML = devs.map((dv, i) => {
     const name = dv.name || dv.ip;
     const upPct = dv.total_bytes ? Math.round(dv.up_bytes * 100 / dv.total_bytes) : 50;
-    return `<div class="p-2 rounded-lg bg-slate-800/30 hover:bg-slate-800/50 transition">
+    return `<div class="p-2 rounded-lg bg-slate-800/30 hover:bg-slate-800/50 transition cursor-pointer" data-name="${esc(name)}" onclick="showDevHistory('${dv.ip}', this.dataset.name)">
       <div class="flex items-center justify-between gap-2 mb-1">
         <div class="flex items-center gap-2 min-w-0 flex-1">
           <span class="text-[10px] font-mono text-slate-600 w-5 text-right">${i + 1}</span>
@@ -2754,6 +3002,140 @@ setupFullscreenGlobe();
 // Initial traffic load (period-driven cadence, also fires after period chip click)
 refreshTraffic();
 setInterval(() => { if (!document.hidden) refreshTraffic(); }, 30000);
+
+// Růst dat (audit DevOps: capacity trend) — pomalá data, obnova à 5 min
+let capChart = null;
+async function refreshCapacity() {
+  try {
+    const d = await fetch("/api/capacity-trend").then(r => r.json());
+    const n = d.now || {};
+    $("cap-now").innerHTML = [
+      ["store.db", (n.db_mb || 0) + " MB"], ["WAL", (n.wal_mb || 0) + " MB"],
+      ["eve.json", (n.eve_mb || 0) + " MB"], ["suricata logy", fmtBytes((n.suri_dir_mb || 0) * 1048576)],
+      ["disk", (n.disk_pct || 0) + " %"],
+    ].map(([k, v]) => `<div><span>${k}</span><div class="text-slate-300 font-mono">${v}</div></div>`).join("");
+    const hist = d.history || [];
+    if (!capChart) capChart = new Chart($("chart-capacity"), {
+      type: "line",
+      data: { labels: [], datasets: [
+        { label: "store.db MB", data: [], borderColor: "rgba(6,182,212,0.9)", backgroundColor: "transparent", tension: 0.3, pointRadius: 0, borderWidth: 1.5 },
+        { label: "eve.json MB", data: [], borderColor: "rgba(16,185,129,0.9)", backgroundColor: "transparent", tension: 0.3, pointRadius: 0, borderWidth: 1.5 },
+        { label: "disk %", data: [], borderColor: "rgba(244,63,94,0.8)", backgroundColor: "transparent", tension: 0.3, pointRadius: 0, borderWidth: 1.5, yAxisID: "y2" },
+      ]},
+      options: { responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { labels: { color: "#94a3b8", font: { size: 9 }, boxWidth: 12 } } },
+        scales: { x: { ticks: { color: "#64748b", font: { size: 8 }, maxTicksLimit: 10 }, grid: { display: false } },
+                  y: { ticks: { color: "#64748b", font: { size: 8 } }, grid: { color: "rgba(51,65,85,0.3)" } },
+                  y2: { position: "right", min: 0, max: 100, ticks: { color: "#64748b", font: { size: 8 } }, grid: { display: false } } } }
+    });
+    capChart.data.labels = hist.map(b => new Date(b.ts * 1000).toLocaleDateString("cs-CZ", { day: "2-digit", month: "2-digit" }));
+    capChart.data.datasets[0].data = hist.map(b => b.db_mb);
+    capChart.data.datasets[1].data = hist.map(b => b.eve_mb);
+    capChart.data.datasets[2].data = hist.map(b => b.disk_pct);
+    capChart.update("none");
+  } catch (e) {}
+}
+refreshCapacity();
+setInterval(() => { if (!document.hidden) refreshCapacity(); }, 300000);
+
+// === Vlny 1-3: týdenní souhrn · měsíční historie · speedtest · AI · kiosk ===
+document.head.insertAdjacentHTML("beforeend", `<style>
+  .score-ring{width:64px;height:64px;border-radius:9999px;background:conic-gradient(var(--ring-c,#34d399) calc(var(--p,0)*1%), rgba(51,65,85,.35) 0);display:flex;align-items:center;justify-content:center}
+  .score-ring>div{width:50px;height:50px;border-radius:9999px;background:rgb(2 6 23 / .92);display:flex;align-items:center;justify-content:center}
+  body.kiosk .tab-nav{display:none}
+  body.kiosk{zoom:1.12}
+</style>`);
+
+let weeklyLines = [];
+async function refreshWeekly() {
+  try {
+    const d = await fetch("/api/weekly-report").then(r => r.json());
+    weeklyLines = d.lines || [];
+    $("wr-meta").textContent = d.generated || "";
+    $("wr-lines").innerHTML = weeklyLines.map(l => `<div>${esc(l)}</div>`).join("");
+  } catch (e) {}
+}
+function copyWeekly(btn) {
+  navigator.clipboard.writeText("NetWatch — týdenní souhrn (" + ($("wr-meta").textContent || "") + ")\n" + weeklyLines.join("\n"));
+  if (btn) btn.textContent = "✓ zkopírováno";
+}
+
+async function refreshMonthly() {
+  try {
+    const d = await fetch("/api/monthly-stats").then(r => r.json());
+    const el = $("monthly-table"); if (!el) return;
+    el.innerHTML = (d.months || []).length
+      ? d.months.map(m => `<tr class="hover:bg-slate-800/30"><td class="pl-1 font-mono text-[11px] text-slate-200">${m.month}</td><td class="text-right font-mono text-[11px] text-rose-300">${fmtNum(m.alerts || 0)}</td><td class="text-right font-mono text-[11px] text-amber-300">${fmtNum(m.fw_drops || 0)}</td><td class="text-right font-mono text-[11px] text-slate-300">${fmtNum(m.attackers || 0)}</td><td class="text-right font-mono text-[11px] text-cyan-300">${fmtNum(m.dns_queries || 0)}</td><td class="text-right font-mono text-[11px] text-emerald-300">${(m.wan_down_gb || 0).toFixed(0)} GB</td><td class="pr-1 text-right font-mono text-[11px] text-slate-400">${m.anomalies || 0}</td></tr>`).join("")
+      : '<tr><td colspan="7" class="text-slate-500 text-center py-3 text-[11px]">první agregát vznikne do hodiny (hodinová údržba)</td></tr>';
+  } catch (e) {}
+}
+
+let spdChart = null;
+async function refreshSpeedtest() {
+  try {
+    const d = await fetch("/api/speedtest").then(r => r.json());
+    const l = d.last;
+    if (l) {
+      $("spd-down").textContent = l.down_mbps + " Mb/s";
+      $("spd-up").textContent = l.up_mbps + " Mb/s";
+      $("spd-lat").textContent = (l.latency_ms ?? "—") + " ms";
+      $("spd-meta").textContent = "poslední měření: " + new Date(l.ts * 1000).toLocaleString("cs-CZ") + (d.running ? " · ⏳ test právě běží…" : "");
+    } else if (d.running) { $("spd-meta").textContent = "⏳ test právě běží…"; }
+    const h = d.history || [];
+    if (!spdChart) spdChart = new Chart($("chart-speedtest"), { type: "line", data: { labels: [], datasets: [
+      { label: "↓ Mb/s", data: [], borderColor: "rgba(16,185,129,0.9)", backgroundColor: "transparent", tension: 0.3, pointRadius: 2, borderWidth: 1.5 },
+      { label: "↑ Mb/s", data: [], borderColor: "rgba(6,182,212,0.9)", backgroundColor: "transparent", tension: 0.3, pointRadius: 2, borderWidth: 1.5 },
+    ]}, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } },
+      scales: { x: { ticks: { color: "#64748b", font: { size: 8 }, maxTicksLimit: 8 }, grid: { display: false } },
+                y: { ticks: { color: "#64748b", font: { size: 8 } }, grid: { color: "rgba(51,65,85,0.3)" } } } } });
+    spdChart.data.labels = h.map(b => new Date(b.ts * 1000).toLocaleString("cs-CZ", { day: "2-digit", month: "2-digit", hour: "2-digit" }));
+    spdChart.data.datasets[0].data = h.map(b => b.down_mbps);
+    spdChart.data.datasets[1].data = h.map(b => b.up_mbps);
+    spdChart.update("none");
+  } catch (e) {}
+}
+async function runSpeedtest() {
+  $("spd-run").textContent = "měřím…";
+  $("spd-meta").textContent = "⏳ test běží — výsledek do ~45 s";
+  try { await fetch("/api/speedtest/run", { method: "POST" }); } catch (e) {}
+  setTimeout(() => { refreshSpeedtest(); $("spd-run").textContent = "⏱ změřit teď"; }, 45000);
+}
+
+async function showAiExplain(sig, cat) {
+  const m = $("ai-modal");
+  $("ai-sig").textContent = sig;
+  $("ai-body").textContent = "Ptám se Claude…";
+  $("ai-foot").textContent = "";
+  m.classList.add("show");
+  try {
+    const d = await fetch(`/api/ai-explain?signature=${encodeURIComponent(sig)}&category=${encodeURIComponent(cat || "")}`).then(r => r.json());
+    if (d.configured === false) { $("ai-body").textContent = "AI vysvětlení není zapnuté. " + (d.hint || ""); return; }
+    if (d.error) { $("ai-body").textContent = "Chyba: " + d.error; return; }
+    $("ai-body").textContent = d.explanation;
+    $("ai-foot").textContent = (d.cached ? "z cache" : "čerstvě od Claude Haiku") + " · AI shrnutí — ověř vlastním úsudkem";
+  } catch (e) { $("ai-body").textContent = "Chyba: " + e.message; }
+}
+$("ai-modal").addEventListener("click", e => { if (e.target.id === "ai-modal") e.currentTarget.classList.remove("show"); });
+
+if (new URLSearchParams(location.search).get("kiosk") === "1") {
+  document.body.classList.add("kiosk");
+  const kStart = document.querySelector("[data-target=tab-overview]");
+  if (kStart) kStart.click();   // kiosk vždy startuje na Přehledu (ne na persistovaném tabu)
+  const kOrder = ["tab-overview", "tab-security", "tab-network", "tab-dns"];
+  let kIdx = 0;
+  setInterval(() => {
+    kIdx = (kIdx + 1) % kOrder.length;
+    const btn = document.querySelector(`[data-target=${kOrder[kIdx]}]`);
+    if (btn) { btn.click(); window.scrollTo({ top: 0 }); }
+  }, 25000);
+}
+
+refreshWeekly();
+refreshMonthly();
+refreshSpeedtest();
+setInterval(() => { if (!document.hidden) refreshWeekly(); }, 600000);
+setInterval(() => { if (!document.hidden) refreshMonthly(); }, 3600000);
+setInterval(() => { if (!document.hidden) refreshSpeedtest(); }, 300000);
 </script>
 </body>
 </html>

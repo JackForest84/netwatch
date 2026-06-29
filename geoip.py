@@ -1,5 +1,6 @@
 """GeoIP lookup (MaxMind GeoLite2) + private-IP helper + country->flag emoji."""
 from __future__ import annotations
+import logging
 import re
 from pathlib import Path
 from typing import Any
@@ -35,6 +36,9 @@ class GeoLookup:
         try:
             return maxminddb.open_database(str(path))
         except FileNotFoundError:
+            return None
+        except Exception:
+            logging.getLogger("netwatch").warning("GeoIP DB %s nelze otevřít", path, exc_info=True)
             return None
 
     def lookup(self, ip: str) -> dict[str, Any]:

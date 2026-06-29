@@ -64,6 +64,10 @@ class NetflowCollector:
         self.packets = 0
         self.last_packet: float | None = None
         self.bound = False
+        # live view: last completed flush window (for rolling ~1-2 min rates)
+        self.last_rows: dict[str, tuple[int, int]] = {}   # ip -> (down, up)
+        self.last_window: float = 0.0
+        self.window_start: float = time.time()
 
     def _parse(self, data: bytes) -> None:
         if len(data) < 20 or struct.unpack("!H", data[:2])[0] != 9:
@@ -124,13 +128,18 @@ class NetflowCollector:
             off += length
 
     def _flush(self) -> None:
+        now = time.time()
         with self.lock:
-            if not self.up and not self.down:
-                return
             ips = set(self.up) | set(self.down)
             rows = [(ip, int(self.down.get(ip, 0)), int(self.up.get(ip, 0))) for ip in ips]
+            # rotate the live window even when empty, so live() rates stay honest
+            self.last_rows = {ip: (d, u) for ip, d, u in rows}
+            self.last_window = now - self.window_start
+            self.window_start = now
             self.up.clear()
             self.down.clear()
+        if not rows:
+            return
         try:
             store.insert_device_inet(rows)
         except Exception:
@@ -162,6 +171,27 @@ class NetflowCollector:
 
     def start(self) -> None:
         threading.Thread(target=self._serve, daemon=True, name="netflow").start()
+
+    def live(self) -> dict:
+        """Rolling per-device rates: last completed flush window + the in-progress
+        one (= data over the past ~60-120 s). NetFlow records arrive on flow expiry,
+        so a shorter window would be lumpy, not more 'real-time' (ADR 0003)."""
+        now = time.time()
+        with self.lock:
+            acc: dict[str, list[int]] = {ip: [d, u] for ip, (d, u) in self.last_rows.items()}
+            for ip, b in self.down.items():
+                acc.setdefault(ip, [0, 0])[0] += b
+            for ip, b in self.up.items():
+                acc.setdefault(ip, [0, 0])[1] += b
+            window = max(1.0, self.last_window + (now - self.window_start))
+            last_packet = self.last_packet
+        devices = [
+            {"ip": ip, "down_bytes": d, "up_bytes": u,
+             "down_bps": round(d * 8 / window), "up_bps": round(u * 8 / window)}
+            for ip, (d, u) in acc.items() if d + u > 0
+        ]
+        devices.sort(key=lambda x: x["down_bytes"] + x["up_bytes"], reverse=True)
+        return {"window_s": round(window), "devices": devices, "last_packet": last_packet}
 
     def health(self) -> dict:
         return {"bound": self.bound, "packets": self.packets, "last_packet": self.last_packet}

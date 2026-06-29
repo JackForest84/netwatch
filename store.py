@@ -8,10 +8,20 @@ import sqlite3
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from threading import Lock
+from threading import Lock, local
 from typing import Any, Iterable
 
 import config
+
+
+def _bucket_start(ts: float, bucket_seconds: int) -> int:
+    """Začátek bucketu. Pro denní (86400 s) zarovnává na LOKÁLNÍ půlnoc, ne UTC
+    (jinak „den" v grafu běží 02:00–02:00, v zimě 01:00–01:00)."""
+    if bucket_seconds == 86400:
+        lt = time.localtime(ts)
+        return int(time.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday, 0, 0, 0, 0, 0, -1)))
+    return int(ts // bucket_seconds) * bucket_seconds
+
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS alerts (
@@ -141,6 +151,44 @@ CREATE TABLE IF NOT EXISTS dns_history (
 CREATE INDEX IF NOT EXISTS idx_dnsh_ts ON dns_history(ts_hour);
 CREATE INDEX IF NOT EXISTS idx_di_ip_ts ON device_inet(ip, ts);
 
+-- Anomálie (vlna 1): baseline detektory zapisují, feed + API čtou
+CREATE TABLE IF NOT EXISTS anomalies (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts            REAL NOT NULL,
+    kind          TEXT NOT NULL,      -- device-traffic | dns-spike | alert-spike
+    key           TEXT NOT NULL,      -- ip / hodina / global
+    severity      TEXT,
+    title         TEXT,
+    detail        TEXT,
+    value         REAL,
+    baseline      REAL
+);
+CREATE INDEX IF NOT EXISTS idx_anom_ts ON anomalies(ts);
+
+-- Speedtest historie (vlna 3) — 4 řádky/den, neprunuje se
+CREATE TABLE IF NOT EXISTS speedtest (
+    ts            REAL PRIMARY KEY,
+    down_mbps     REAL,
+    up_mbps       REAL,
+    latency_ms    REAL
+);
+
+-- Měsíční agregáty navždy (vlna 2) — přežijí 30denní retenci detailních tabulek
+CREATE TABLE IF NOT EXISTS monthly_stats (
+    month         TEXT NOT NULL,      -- YYYY-MM (localtime)
+    metric        TEXT NOT NULL,
+    value         REAL,
+    PRIMARY KEY (month, metric)
+);
+
+-- Cache AI vysvětlení signatur (vlna 3) — signatury se opakují, volá se jednou
+CREATE TABLE IF NOT EXISTS ai_explanations (
+    signature     TEXT PRIMARY KEY,
+    explanation   TEXT,
+    model         TEXT,
+    created_at    REAL
+);
+
 -- Covering indexes for hottest aggregations (audit perf #4)
 CREATE INDEX IF NOT EXISTS idx_alerts_ts_src ON alerts(ts, src_ip);
 CREATE INDEX IF NOT EXISTS idx_drops_ts_src ON firewall_drops(ts, src_ip);
@@ -151,23 +199,42 @@ class Store:
     def __init__(self, path: Path) -> None:
         self.path = path
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.lock = Lock()
+        self.lock = Lock()            # serializuje JEN zápisy na writer connection
+        self._local = local()        # čtení: connection per vlákno (WAL → souběžní čtenáři)
         self._conn = sqlite3.connect(str(path), check_same_thread=False, isolation_level=None)
         self._conn.execute("PRAGMA journal_mode=WAL;")
         self._conn.execute("PRAGMA synchronous=NORMAL;")
         self._conn.execute("PRAGMA cache_size=-32000;")        # 32 MB page cache (audit perf #3)
         self._conn.execute("PRAGMA wal_autocheckpoint=2000;")  # checkpoint sooner (audit perf #4)
+        self._conn.execute("PRAGMA busy_timeout=5000;")        # wait up to 5s on a locked DB instead of raising (audit reliability)
         self._conn.executescript(SCHEMA)
+        # Migrace: capacity sloupce v traffic_snapshots (audit: trend růstu dat)
+        cols = {r[1] for r in self._conn.execute("PRAGMA table_info(traffic_snapshots)")}
+        for col in ("db_mb", "wal_mb", "disk_pct", "health_score"):
+            if col not in cols:
+                self._conn.execute(f"ALTER TABLE traffic_snapshots ADD COLUMN {col} REAL")
 
     def _exec(self, sql: str, params: tuple | dict = ()) -> sqlite3.Cursor:
         with self.lock:
             return self._conn.execute(sql, params)
 
+    def _read_conn(self) -> sqlite3.Connection:
+        """Read-only connection per vlákno. WAL dovolí libovolně mnoho souběžných
+        čtenářů + 1 zapisovatele, takže UI čtení nikdy nečeká za background skenem
+        ani zápisem (dřív vše serializoval jeden self.lock → kontence, audit)."""
+        c = getattr(self._local, "conn", None)
+        if c is None:
+            c = sqlite3.connect(str(self.path), check_same_thread=False, isolation_level=None)
+            c.execute("PRAGMA query_only=ON;")
+            c.execute("PRAGMA busy_timeout=5000;")
+            self._local.conn = c
+        return c
+
     def _query(self, sql: str, params: tuple | dict = ()) -> list[dict[str, Any]]:
-        with self.lock:
-            cur = self._conn.execute(sql, params)
-            cols = [c[0] for c in cur.description]
-            return [dict(zip(cols, row)) for row in cur.fetchall()]
+        # BEZ self.lock — čte se z vláknové read connection, souběžně s kýmkoli jiným
+        cur = self._read_conn().execute(sql, params)
+        cols = [c[0] for c in cur.description]
+        return [dict(zip(cols, row)) for row in cur.fetchall()]
 
     # ---- Alerts -------------------------------------------------------------
 
@@ -293,7 +360,7 @@ class Store:
     def top_drop_sources(self, hours: int = 24, limit: int = 10) -> list[dict]:
         cutoff = time.time() - hours * 3600
         return self._query(
-            "SELECT src_ip, COUNT(*) AS hits FROM firewall_drops WHERE ts > ? "
+            "SELECT src_ip, COUNT(*) AS hits FROM firewall_drops INDEXED BY idx_drops_ts WHERE ts > ? "
             "GROUP BY src_ip ORDER BY hits DESC LIMIT ?",
             (cutoff, limit)
         )
@@ -332,11 +399,17 @@ class Store:
         # Snapshot pruning (keep 30d of system snapshots too)
         cutoff = time.time() - config.ALERT_RETENTION_DAYS * 86400
         result["snapshots"] = self._exec("DELETE FROM traffic_snapshots WHERE ts < ?", (cutoff,)).rowcount
+        self._exec("DELETE FROM anomalies WHERE ts < ?", (time.time() - 90 * 86400,))
+        try:
+            self.update_monthly_stats()
+        except Exception:
+            pass
         # Incremental vacuum reclaims unused pages without locking
         with self.lock:
             self._conn.execute("PRAGMA incremental_vacuum(2000)")
             # Truncate WAL so it doesn't grow to 2x DB size (audit perf #4)
             self._conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            self._conn.execute("PRAGMA optimize")
         return result
 
     # ---- Enrichment cache ---------------------------------------------------
@@ -352,9 +425,17 @@ class Store:
             self._conn.execute(
                 "INSERT INTO enrichment (ip, fetched_at, vt_malicious, vt_suspicious, vt_country, vt_as_owner, vt_raw, abuse_score, abuse_reports, abuse_country, abuse_isp, abuse_raw) "
                 "VALUES (?,?,?,?,?,?,?,?,?,?,?,?) "
-                "ON CONFLICT(ip) DO UPDATE SET fetched_at=excluded.fetched_at, vt_malicious=excluded.vt_malicious, "
-                "vt_suspicious=excluded.vt_suspicious, vt_country=excluded.vt_country, vt_as_owner=excluded.vt_as_owner, vt_raw=excluded.vt_raw, "
-                "abuse_score=excluded.abuse_score, abuse_reports=excluded.abuse_reports, abuse_country=excluded.abuse_country, abuse_isp=excluded.abuse_isp, abuse_raw=excluded.abuse_raw",
+                "ON CONFLICT(ip) DO UPDATE SET fetched_at=excluded.fetched_at, "
+                "vt_malicious=COALESCE(excluded.vt_malicious, vt_malicious), "
+                "vt_suspicious=COALESCE(excluded.vt_suspicious, vt_suspicious), "
+                "vt_country=COALESCE(excluded.vt_country, vt_country), "
+                "vt_as_owner=COALESCE(excluded.vt_as_owner, vt_as_owner), "
+                "vt_raw=COALESCE(excluded.vt_raw, vt_raw), "
+                "abuse_score=COALESCE(excluded.abuse_score, abuse_score), "
+                "abuse_reports=COALESCE(excluded.abuse_reports, abuse_reports), "
+                "abuse_country=COALESCE(excluded.abuse_country, abuse_country), "
+                "abuse_isp=COALESCE(excluded.abuse_isp, abuse_isp), "
+                "abuse_raw=COALESCE(excluded.abuse_raw, abuse_raw)",
                 (
                     ip, now,
                     (vt or {}).get("malicious"), (vt or {}).get("suspicious"),
@@ -386,11 +467,74 @@ class Store:
 
     def insert_snapshot(self, snap: dict) -> None:
         self._exec(
-            "INSERT OR REPLACE INTO traffic_snapshots (ts, suri_pkts, suri_drops, mt_conn, mt_cpu_pct, eve_mb, devices_online) "
-            "VALUES (?,?,?,?,?,?,?)",
+            "INSERT OR REPLACE INTO traffic_snapshots (ts, suri_pkts, suri_drops, mt_conn, mt_cpu_pct, eve_mb, devices_online, db_mb, wal_mb, disk_pct, health_score) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
             (time.time(), snap.get("suri_pkts"), snap.get("suri_drops"), snap.get("mt_conn"),
-             snap.get("mt_cpu_pct"), snap.get("eve_mb"), snap.get("devices_online"))
+             snap.get("mt_cpu_pct"), snap.get("eve_mb"), snap.get("devices_online"),
+             snap.get("db_mb"), snap.get("wal_mb"), snap.get("disk_pct"), snap.get("health_score"))
         )
+
+    def recent_anomalies(self, hours: float = 24) -> list[dict]:
+        return self._query(
+            "SELECT * FROM anomalies WHERE ts > ? ORDER BY ts DESC LIMIT 50",
+            (time.time() - hours * 3600,))
+
+    def speedtest_history(self, days: int = 7) -> list[dict]:
+        return self._query(
+            "SELECT ts, down_mbps, up_mbps, latency_ms FROM speedtest WHERE ts > ? ORDER BY ts",
+            (time.time() - days * 86400,))
+
+    def update_monthly_stats(self) -> None:
+        """Upsert agregátů AKTUÁLNÍHO měsíce (volá maintenance à 1 h). MAX guard:
+        čítače v měsíci jen rostou, takže když detailní data odtečou retencí
+        (31denní měsíc vs 30denní retence), nepodlezeme dřívější hodnotu."""
+        lt = time.localtime()
+        ym = time.strftime("%Y-%m", lt)
+        m0 = time.mktime((lt.tm_year, lt.tm_mon, 1, 0, 0, 0, 0, 0, -1))
+
+        def scalar(q: str, *p) -> float:
+            rows = self._query(q, p)
+            return (rows[0]["n"] or 0) if rows else 0
+
+        wan = self.interface_traffic_month("wan", ym)
+        vals = {
+            "alerts": scalar("SELECT COUNT(*) AS n FROM alerts WHERE ts >= ?", m0),
+            "fw_drops": scalar("SELECT COUNT(*) AS n FROM firewall_drops WHERE ts >= ?", m0),
+            "attackers": scalar(
+                "SELECT COUNT(*) AS n FROM (SELECT src_ip FROM alerts WHERE ts >= ? AND src_ip IS NOT NULL "
+                "UNION SELECT src_ip FROM firewall_drops WHERE ts >= ? AND src_ip IS NOT NULL)", m0, m0),
+            "dns_queries": scalar("SELECT SUM(queries) AS n FROM dns_history WHERE ts_hour >= ?", m0),
+            "dns_blocked": scalar("SELECT SUM(blocked) AS n FROM dns_history WHERE ts_hour >= ?", m0),
+            "wan_down_gb": round((wan.get("rx_bytes") or 0) / 1e9, 2),
+            "wan_up_gb": round((wan.get("tx_bytes") or 0) / 1e9, 2),
+            "anomalies": scalar("SELECT COUNT(*) AS n FROM anomalies WHERE ts >= ?", m0),
+        }
+        with self.lock:
+            self._conn.executemany(
+                "INSERT INTO monthly_stats (month, metric, value) VALUES (?,?,?) "
+                "ON CONFLICT(month, metric) DO UPDATE SET value=MAX(value, excluded.value)",
+                [(ym, k, v) for k, v in vals.items()])
+
+    def monthly_stats(self) -> list[dict]:
+        """[{month, alerts, fw_drops, ...}] — řádek per měsíc, nejnovější první."""
+        rows = self._query("SELECT month, metric, value FROM monthly_stats ORDER BY month DESC")
+        out: dict[str, dict] = {}
+        for r in rows:
+            out.setdefault(r["month"], {"month": r["month"]})[r["metric"]] = r["value"]
+        return list(out.values())
+
+    def capacity_history(self, days: int = 30) -> list[dict]:
+        """Poslední snapshot za každý (lokální) den — trend růstu dat (audit)."""
+        cutoff = time.time() - days * 86400
+        rows = self._query(
+            "SELECT ts, eve_mb, db_mb, wal_mb, disk_pct FROM traffic_snapshots WHERE ts > ? ORDER BY ts",
+            (cutoff,))
+        daily: dict[int, dict] = {}
+        for r in rows:
+            daily[_bucket_start(r["ts"], 86400)] = r
+        return [{"ts": ts, "eve_mb": r["eve_mb"], "db_mb": r["db_mb"],
+                 "wal_mb": r["wal_mb"], "disk_pct": r["disk_pct"]}
+                for ts, r in sorted(daily.items())]
 
     # ---- Stats over rolling window -----------------------------------------
 
@@ -542,7 +686,7 @@ class Store:
         buckets: dict[int, dict] = defaultdict(lambda: {"rx": 0, "tx": 0})
         prev: dict[str, dict] = {}
         for r in rows:
-            bucket = int(r["ts"] // bucket_seconds) * bucket_seconds
+            bucket = _bucket_start(r["ts"], bucket_seconds)
             p = prev.get(r["name"])
             if p:
                 dr = r["rx_bytes"] - p["rx_bytes"]
@@ -585,7 +729,9 @@ class Store:
             return
         with self.lock:
             self._conn.executemany(
-                "INSERT OR REPLACE INTO dns_history (ts_hour, instance, queries, blocked) VALUES (?,?,?,?)",
+                "INSERT INTO dns_history (ts_hour, instance, queries, blocked) VALUES (?,?,?,?) "
+                "ON CONFLICT(ts_hour, instance) DO UPDATE SET "
+                "queries=MAX(queries, excluded.queries), blocked=MAX(blocked, excluded.blocked)",
                 rows,
             )
 
@@ -618,7 +764,7 @@ class Store:
         from collections import defaultdict
         buckets: dict[int, dict] = defaultdict(lambda: {"queries": 0, "blocked": 0})
         for r in rows:
-            bk = int(r["ts_hour"] // bucket_seconds) * bucket_seconds
+            bk = _bucket_start(r["ts_hour"], bucket_seconds)
             buckets[bk]["queries"] += r["q"] or 0
             buckets[bk]["blocked"] += r["b"] or 0
         return [{"ts": ts, **b} for ts, b in sorted(buckets.items())]
@@ -632,6 +778,20 @@ class Store:
         with self.lock:
             self._conn.executemany(
                 "INSERT INTO device_inet (ts, ip, down_bytes, up_bytes) VALUES (?,?,?,?)", data)
+
+    def device_inet_history(self, ip: str, hours: float, bucket_seconds: int) -> list[dict]:
+        """Bucketovaná časová řada down/up pro jedno zařízení (audit UX: per-device graf)."""
+        cutoff = time.time() - hours * 3600
+        rows = self._query(
+            "SELECT ts, down_bytes, up_bytes FROM device_inet WHERE ip = ? AND ts > ? ORDER BY ts",
+            (ip, cutoff))
+        from collections import defaultdict
+        buckets: dict[int, dict] = defaultdict(lambda: {"down": 0, "up": 0})
+        for r in rows:
+            bk = _bucket_start(r["ts"], bucket_seconds)
+            buckets[bk]["down"] += r["down_bytes"] or 0
+            buckets[bk]["up"] += r["up_bytes"] or 0
+        return [{"ts": ts, **b} for ts, b in sorted(buckets.items())]
 
     def device_inet_period(self, hours: float = 24) -> list[dict]:
         cutoff = time.time() - hours * 3600

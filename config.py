@@ -48,6 +48,9 @@ UNIFI_LEGACY_SITE = _env("UNIFI_LEGACY_SITE", "default")
 VIRUSTOTAL_API_KEY = _load_secret("vt.key")
 ABUSEIPDB_API_KEY = _load_secret("abuseipdb.key")
 
+# Anthropic (optional — AI alert explanations; without a key the feature is off)
+ANTHROPIC_API_KEY = _load_secret("anthropic.key")
+
 # ntopng REST API (form-based login)
 NTOPNG_URL = _env("NTOPNG_URL", "http://127.0.0.1:3000")
 NTOPNG_USER = _env("NTOPNG_USER", "admin")
