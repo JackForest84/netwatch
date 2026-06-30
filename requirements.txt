@@ -1,15 +1,15 @@
 # NetWatch dashboard — Python dependencies
 fastapi==0.101.0              # held as a set with starlette/pydantic (see note below)
-pydantic==1.10.14             # app uses the pydantic v1 API — do NOT bump to v2
+pydantic==1.10.26             # app uses the pydantic v1 API — do NOT bump to v2
 starlette==0.27.0             # FastAPI 0.101 requires <0.28 — bump together with fastapi
-uvicorn[standard]==0.27.1
-jinja2==3.1.5                 # security update
-python-multipart==0.0.18      # form-based login; fixes CVE-2024-53981 (DoS)
-requests==2.32.3              # security update (.netrc leak / cert handling)
-psutil==5.9.8                 # host metrics
-maxminddb==2.5.2              # MaxMind GeoLite2 country/ASN lookups
+uvicorn[standard]==0.49.0
+jinja2==3.1.6                 # security update
+python-multipart==0.0.32      # form-based login; fixes CVE-2024-53981 (DoS)
+requests==2.34.2              # security update (.netrc leak / cert handling)
+psutil==7.2.2                 # host metrics
+maxminddb==3.1.1              # MaxMind GeoLite2 country/ASN lookups
 itsdangerous==2.2.0           # signed session cookie
-urllib3==2.2.3                # security update (redirect header leak)
+urllib3==2.7.0                # security update (redirect header leak)
 
 # NOTE: fastapi + starlette + pydantic are held together — the app is written
 # against the pydantic v1 API (pydantic v2 breaks it). Dependabot is configured to
