@@ -1,15 +1,19 @@
 # NetWatch dashboard — Python dependencies
-fastapi==0.101.0
-pydantic==1.10.14              # app uses the pydantic v1 API — do NOT bump to v2
+fastapi==0.101.0              # held as a set with starlette/pydantic (see note below)
+pydantic==1.10.14             # app uses the pydantic v1 API — do NOT bump to v2
+starlette==0.27.0             # FastAPI 0.101 requires <0.28 — bump together with fastapi
 uvicorn[standard]==0.27.1
-jinja2==3.1.2
-python-multipart==0.0.9        # form-based login
-requests==2.31.0
-psutil==5.9.8                  # host metrics
-maxminddb==2.5.2               # MaxMind GeoLite2 country/ASN lookups
-itsdangerous==2.1.2            # signed session cookie
-urllib3==2.0.7
-starlette==0.27.0              # FastAPI 0.101 requires <0.28 — pinned to match
+jinja2==3.1.5                 # security update
+python-multipart==0.0.18      # form-based login; fixes CVE-2024-53981 (DoS)
+requests==2.32.3              # security update (.netrc leak / cert handling)
+psutil==5.9.8                 # host metrics
+maxminddb==2.5.2              # MaxMind GeoLite2 country/ASN lookups
+itsdangerous==2.2.0           # signed session cookie
+urllib3==2.2.3                # security update (redirect header leak)
+
+# NOTE: fastapi + starlette + pydantic are held together — the app uses the
+# pydantic v1 API. Newer FastAPI still supports pydantic v1, so this trio can be
+# upgraded; it is left to a reviewed Dependabot PR so it moves (and is tested) as one.
 
 # Front-end libs (Chart.js, D3, topojson, world-atlas) load from a CDN in
 # templates/index.html — no Python dependency. ntopng/Redis/Suricata/EveBox
