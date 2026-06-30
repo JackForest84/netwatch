@@ -9,6 +9,14 @@ updates:
     groups:
       python-deps:
         patterns: ["*"]
+    ignore:
+      # The app is written against the pydantic v1 API (pydantic v2 breaks it),
+      # and FastAPI/Starlette are pinned to that era. Upgrading the trio needs a
+      # tested live-app migration, not an automatic PR — so manage it manually.
+      - dependency-name: "pydantic"
+        versions: [">=2.0.0"]
+      - dependency-name: "fastapi"
+      - dependency-name: "starlette"
 
   # GitHub Actions used by the workflows
   - package-ecosystem: "github-actions"

@@ -11,9 +11,9 @@ maxminddb==2.5.2              # MaxMind GeoLite2 country/ASN lookups
 itsdangerous==2.2.0           # signed session cookie
 urllib3==2.2.3                # security update (redirect header leak)
 
-# NOTE: fastapi + starlette + pydantic are held together — the app uses the
-# pydantic v1 API. Newer FastAPI still supports pydantic v1, so this trio can be
-# upgraded; it is left to a reviewed Dependabot PR so it moves (and is tested) as one.
+# NOTE: fastapi + starlette + pydantic are held together — the app is written
+# against the pydantic v1 API (pydantic v2 breaks it). Dependabot is configured to
+# ignore this trio; upgrade it manually with a tested live-app migration.
 
 # Front-end libs (Chart.js, D3, topojson, world-atlas) load from a CDN in
 # templates/index.html — no Python dependency. ntopng/Redis/Suricata/EveBox
