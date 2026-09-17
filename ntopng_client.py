@@ -81,7 +81,7 @@ class NtopngClient:
     def _fetch(self) -> dict[str, Any]:
         data: dict[str, Any] = {}
         try:
-            d = self._get("/lua/rest/v2/get/system/stats.lua")
+            d = self._get("/lua/rest/v2/get/system/health/stats.lua")
             data["system_stats"] = d.get("rsp", {})
         except Exception as e:
             data["system_stats"] = {}
